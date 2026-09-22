@@ -18,8 +18,8 @@
 **יש CI.** `.github/workflows/test.yml` רץ על כל push ל-`main` ובדרישה
 ידנית: format+analyze+test בשתי החבילות (שורש ו-`app/`).
 `.github/workflows/release.yml` רץ רק בדרישה ידנית: מעלה patch version
-בנעילה הדדית בשני ה-`pubspec.yaml`, בונה, אורז ב-Inno Setup ומפרסם
-Release. שני קבצי ה-workflow משכפלים את `seforim_library_updater`
+בנעילה הדדית בשני ה-`pubspec.yaml`, בונה, אורז ב-Inno Setup ל-EXE יחיד
+ומפרסם Release — ראו §16. שני קבצי ה-workflow משכפלים את `seforim_library_updater`
 מ-`Otzaria/Otzaria_Offline_update` לפני הבנייה, כי ה-path dependency
 המקומי (`../Otzariya_update`) לא קיים אצל ה-runner.
 
@@ -261,3 +261,34 @@ unsendable`. ראו גם §9 למעלה, שהוא אותו כלל בצד המנ�
 **טקסט למשתמש אינו נושא מונחים פנימיים.** לא `hash`, לא `patch`, לא
 `staging`, לא גרסת סכמה, ולא "subset"/"מסד חלקי" — ראו גם §13. מה
 שהמשתמש רואה הוא ספרים, גודל ומצב; איך זה עובד מבפנים נשאר בלוג ובקוד.
+
+---
+
+## 16. ההפצה היא קובץ אחד, והעדכון העצמי תלוי בזה
+
+`installer/otzaria_subset.iss` אינו מתקין אלא **פורש**: `DefaultDirName`
+הוא `{src}\OtzariaSubset` — תיקייה אחת ליד ה-EXE שהורץ — עם
+`Uninstallable=no` ו-`PrivilegesRequired=lowest` — בלי שום רישום ב-Windows.
+
+**אל תחזיר את זה ל-`{autopf}`.** התיקייה אצל המשתמש היא מה שמאפשר
+ל-`AppUpdater` להחליף את התוכנה בלי UAC. התקנה ל-Program Files הופכת כל
+עדכון עצמי לבקשת הרשאות מנהל — ומשתמש שמסרב נשאר תקוע על גרסה ישנה.
+
+**‏`CloseApplications=yes` ו-`RestartApplications=no` הולכים יחד.** הראשון
+נותן ל-Restart Manager לסגור את התוכנה שמחזיקה את ה-exe שמוחלף; השני
+מונע ממנו להפעיל אותה בעצמו, כי ההפעלה מחדש היא ה-`[Run]` שלנו. בלי
+השני התוכנה עולה פעמיים.
+
+**‏`APP_VERSION` הוא המקור היחיד לגרסה שהתוכנה מכירה על עצמה.** הוא
+מוזרק ב-`--dart-define` מאותה שורת `version` שה-workflow מעלה. קבוע
+כתוב ביד ב-Dart היה נסחף מה-pubspec בשקט, והתוצאה היא תוכנה שמציעה
+עדכון לגרסה שהיא כבר מריצה. `0.0.0` היא בנייה מקומית ואינה בודקת כלום —
+מול `releases/latest` היא הייתה נראית ישנה לנצח.
+
+**כשל בבדיקת העדכון מוחזר כ-`null` ואינו נזרק.** אין רשת, מגבלת קצב של
+GitHub או תשובה בפורמט לא מוכר — כולם שקטים. מי שפתח את התוכנה כדי
+לגזום ספרים לא אמור לראות שגיאה על משהו שלא ביקש.
+
+**שם הקובץ ב-Release אינו חוזה — הסיומת כן.** `AppUpdater` בוחר את
+ה-asset הראשון שמסתיים ב-`.exe`, כדי ששינוי של `OutputBaseFilename` לא
+ישבור גרסאות שכבר יצאו לשטח.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/home_shell.dart';
+import 'services/error_report.dart';
 import 'state/app_settings.dart';
 import 'state/app_state.dart';
 import 'theme.dart';
@@ -7,6 +8,9 @@ export 'state/app_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // לפני כל דבר אחר: תקלה בעלייה היא בדיוק זו שאין עליה מידע אחר.
+  installErrorLogging();
+  ErrorLog.instance.record('התוכנה עלתה');
   final store = await AppSettingsStore.open();
   final state = AppState(store);
   // האיתור קורא קופסת Hive וקבצים — אסינכרוני, ולכן לפני ה-runApp

@@ -28,7 +28,9 @@
   analyze` בשתי החבילות, ו-`flutter test` על השורש.
   `.github/workflows/release.yml` רץ **רק בדרישה ידנית**: מעלה patch
   version בנעילה הדדית בשני ה-`pubspec.yaml`, מריץ את הבדיקות, בונה את
-  האפליקציה, אורז אותה עם Inno Setup
-  (`installer/otzaria_subset.iss`), ומפרסם תג ו-GitHub Release.
+  האפליקציה (עם `--dart-define=APP_VERSION`), אורז אותה עם Inno Setup
+  (`installer/otzaria_subset.iss`) ל-**EXE יחיד שפורש תיקייה אחת
+  לצדו**, ומפרסם תג ו-GitHub Release. אותו EXE הוא גם מה שהעדכון
+  העצמי של התוכנה מוריד — ראו §16 ב-AGENTS.md.
 
 יש להשיב למשתמש בעברית.

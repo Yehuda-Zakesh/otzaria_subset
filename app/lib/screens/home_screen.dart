@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import '../services/app_updater.dart';
 import '../theme.dart';
+import '../widgets/app_update.dart';
 import '../widgets/format.dart';
 import '../widgets/update_guard.dart';
 
@@ -17,12 +19,18 @@ class HomeScreen extends StatelessWidget {
   final String? updateNotice;
   final bool checking;
 
+  /// גרסה חדשה של התוכנה עצמה, אם יש. `null` = אין, או שהבדיקה נכשלה.
+  final AppRelease? appUpdate;
+  final VoidCallback onInstallAppUpdate;
+
   const HomeScreen({
     super.key,
     required this.onChooseBooks,
     required this.onCheckUpdates,
+    required this.onInstallAppUpdate,
     this.updateNotice,
     this.checking = false,
+    this.appUpdate,
   });
 
   @override
@@ -65,6 +73,13 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (appUpdate != null) ...[
+                  const SizedBox(height: 24),
+                  AppUpdateCard(
+                    release: appUpdate!,
+                    onInstall: onInstallAppUpdate,
+                  ),
+                ],
                 if (state.pendingAcquisition.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   _PendingCard(count: state.pendingAcquisition.length),

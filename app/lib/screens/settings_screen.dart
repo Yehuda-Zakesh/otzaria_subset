@@ -5,9 +5,11 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import '../services/app_updater.dart';
 import '../state/app_settings.dart';
 import '../theme.dart';
 import '../widgets/disclaimer.dart';
+import '../widgets/error_report.dart';
 import '../widgets/update_guard.dart';
 
 /// הגדרות. שתי שאלות בלבד — כל השאר נגזר.
@@ -139,6 +141,40 @@ class SettingsScreen extends StatelessWidget {
               settings: state.otzariaUpdates,
               onRecheck: () => unawaited(state.refreshOtzaria()),
             ),
+            const SizedBox(height: 20),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const _IconBadge(
+                    icon: Icons.bug_report_rounded,
+                    color: AppColors.warm,
+                  ),
+                  title: Text(
+                    'דיווח על תקלה',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text(
+                    'שומר קובץ עם פרטי התקלה, ופותח פנייה מוכנה בגיטהאב',
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => unawaited(
+                      showErrorReportDialog(
+                        context,
+                        libraryPath: state.paths.libraryDbPath,
+                      ),
+                    ),
+                    child: const Text('דיווח'),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const _VersionLine(),
             const DisclaimerFooter(),
           ],
         ),
@@ -165,6 +201,23 @@ class SettingsScreen extends StatelessWidget {
     if (dir == null) return;
     await state.saveSettings(state.settings.copyWith(updateFolder: dir));
   }
+}
+
+/// גרסת התוכנה. היחיד מבין המספרים הפנימיים שכן מוצג — מי שמדווח על
+/// תקלה צריך לדעת מה הוא מריץ, וזה אינו מנגנון אלא זהות של הבנייה.
+class _VersionLine extends StatelessWidget {
+  const _VersionLine();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          kAppVersionIsReleased ? 'גרסת התוכנה $kAppVersion' : 'בנייה מקומית',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline,
+              ),
+        ),
+      );
 }
 
 /// תג אייקון קטן וצבעוני, כמו ב-[HomeScreen] — מסמן ויזואלית מה הסעיף.

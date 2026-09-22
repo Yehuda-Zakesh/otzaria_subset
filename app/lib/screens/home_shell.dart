@@ -7,8 +7,11 @@ import 'package:seforim_library_updater/seforim_library_updater.dart';
 
 import '../jobs/jobs.dart';
 import '../main.dart';
+import '../services/app_updater.dart';
+import '../services/error_report.dart';
 import '../services/otzaria_install.dart';
 import '../services/update_flow.dart';
+import '../widgets/app_update.dart';
 import '../widgets/disclaimer.dart';
 import '../widgets/update_guard.dart';
 import 'book_selection_screen.dart';
@@ -31,6 +34,7 @@ class _HomeShellState extends State<HomeShell> {
   var _cancelled = false;
   var _checking = false;
   String? _updateNotice;
+  AppRelease? _appUpdate;
   String? _progressTitle;
   FlowProgress? _progress;
   String? _flowError;
@@ -42,6 +46,7 @@ class _HomeShellState extends State<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_showDisclaimerIfNeeded());
       unawaited(_loadStats());
+      unawaited(_checkAppUpdate());
     });
   }
 
@@ -84,6 +89,42 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  // ── עדכון התוכנה עצמה ────────────────────────────────────────────
+
+  /// בדיקה אחת בעלייה, ברקע. כשל מוחזר כ-`null` ונשאר שקט — מי שבא
+  /// לגזום ספרים לא אמור לראות הודעת שגיאה על משהו שלא ביקש.
+  Future<void> _checkAppUpdate() async {
+    final release = await const AppUpdater().check();
+    if (!mounted || release == null) return;
+    setState(() => _appUpdate = release);
+  }
+
+  /// ההורדה מחליפה את התוכנה שרצה כרגע ומפעילה אותה מחדש, ולכן היא
+  /// זמינה רק מהמסך הראשי — לא באמצע גזימה או עדכון של הספרייה.
+  Future<void> _installAppUpdate() async {
+    final release = _appUpdate;
+    if (release == null) return;
+    if (!await showAppUpdateDialog(context, release)) return;
+    if (!mounted) return;
+    setState(() => _appUpdate = null);
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('העדכון לא הושלם'),
+        content: const Text(
+          'לא הצלחנו להוריד את הגרסה החדשה. לא נגענו בספרייה שלך, ואפשר '
+          'לנסות שוב מאוחר יותר.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('הבנתי'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── בדיקת עדכונים ────────────────────────────────────────────────
 
   Future<void> _checkUpdates() async {
@@ -104,6 +145,7 @@ class _HomeShellState extends State<HomeShell> {
           await _runUpdate(flow, plan);
       }
     } catch (e) {
+      ErrorLog.instance.record('בדיקת העדכונים נכשלה: $e');
       if (mounted) setState(() => _updateNotice = 'בדיקת העדכונים נכשלה');
     } finally {
       if (mounted) setState(() => _checking = false);
@@ -236,7 +278,10 @@ class _HomeShellState extends State<HomeShell> {
     });
     _flow = stream.listen(
       (event) => setState(() => _progress = event),
-      onError: (Object error) => setState(() => _flowError = '$error'),
+      onError: (Object error) {
+        ErrorLog.instance.record('הפעולה נכשלה: $error');
+        setState(() => _flowError = '$error');
+      },
       onDone: () {
         unawaited(_loadStats());
         _state.setCatalog(null);
@@ -315,6 +360,8 @@ class _HomeShellState extends State<HomeShell> {
         _View.home => HomeScreen(
             onChooseBooks: () => setState(() => _view = _View.books),
             onCheckUpdates: _checkUpdates,
+            appUpdate: _appUpdate,
+            onInstallAppUpdate: _installAppUpdate,
             updateNotice: _updateNotice,
             checking: _checking,
           ),

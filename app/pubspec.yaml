@@ -28,6 +28,9 @@ dependencies:
   path_provider: ^2.1.4
   sqlite3: ^3.3.3
   sqlite3_flutter_libs: ^0.5.24
+  # פתיחת פנייה בגיטהאב בדפדפן — ShellExecute דרך הפלאגין, ולא הרכבת
+  # שורת פקודה שמקלקלת כתובת עם פרמטרים מקודדים.
+  url_launcher: ^6.3.1
   # ‏zstandard מביא את ה-DLL ליד ה-exe; zstandard_native הוא ה-FFI הטהור
   # שמעליו בנוי הפירוק בהזרמה.
   zstandard: ^1.3.26

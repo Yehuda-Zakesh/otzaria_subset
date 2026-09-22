@@ -85,10 +85,18 @@ jobs:
         shell: pwsh
         run: flutter test
 
+      # ‏APP_VERSION הוא המקור היחיד לגרסה שהתוכנה מכירה על עצמה —
+      # אותו מספר שנכתב ל-pubspec למעלה. בלי ההזרקה הזו הבדיקה העצמית
+      # תשווה מול `0.0.0` ותציע עדכון לנצח.
+      # ‏split-debug-info מוציא את סמלי ה-Dart מה-snapshot ומוריד כמה
+      # מגהבייטים מההורדה — הם חסרי ערך אצל המשתמש.
       - name: flutter build windows --release (app)
         shell: pwsh
         working-directory: app
-        run: flutter build windows --release
+        run: >
+          flutter build windows --release
+          --dart-define=APP_VERSION=${{ steps.bump-version.outputs.version }}
+          --split-debug-info=build\symbols
 
       - name: Ensure Inno Setup is installed
         shell: pwsh
@@ -101,7 +109,9 @@ jobs:
             throw "ISCC.exe not found at $iscc after installing Inno Setup"
           }
 
-      - name: Build installer (Inno Setup)
+      # אריזה לקובץ הפצה יחיד: EXE שפורש תיקייה אחת לידו ומפעיל אותה.
+      # אותו קובץ בדיוק הוא גם מה שהעדכון העצמי מוריד ומריץ בשקט.
+      - name: Build portable deployer (Inno Setup)
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -124,6 +134,6 @@ jobs:
         with:
           tag_name: v${{ steps.bump-version.outputs.version }}
           name: v${{ steps.bump-version.outputs.version }}
-          files: installer/output/otzaria-subset-setup-${{ steps.bump-version.outputs.version }}.exe
+          files: installer/output/otzaria-subset-${{ steps.bump-version.outputs.version }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

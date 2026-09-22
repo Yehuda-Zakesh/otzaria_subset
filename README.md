@@ -290,6 +290,23 @@ flutter build windows --release           # בנייה
 בנייה, אריזה ב-Inno Setup (`installer/otzaria_subset.iss`), ופרסום
 GitHub Release.
 
+### ההפצה: קובץ אחד
+
+הפרסום הוא **EXE יחיד**. הרצה שלו פורשת תיקייה אחת (`OtzariaSubset`)
+לצדו ומפעילה את התוכנה — אין התקנה ל-Program Files, אין רישום
+ב-Windows, אין הסרה ואין UAC. זו אינה רק נוחות: בלי הרשאות מנהל
+**העדכון העצמי יכול להחליף את התוכנה בעצמו**, כי התיקייה שייכת
+למשתמש.
+
+התוכנה בודקת בעלייה, ברקע, אם יצא Release חדש
+(`app/lib/services/app_updater.dart`), ואם כן מציעה כפתור. לחיצה
+מורידה את אותו EXE בדיוק, מריצה אותו שקט על התיקייה הנוכחית
+(`/VERYSILENT /DIR=…`) ויוצאת; Inno סוגר את מה שנשאר פתוח, מחליף
+ומפעיל מחדש. **הגרסה שהתוכנה מכירה על עצמה מוזרקת בבנייה**
+(`--dart-define=APP_VERSION`) מאותה שורת `version` שב-`pubspec.yaml`,
+כדי שלא יהיה מקור שני שיכול להיסחף ממנה. בנייה מקומית נושאת `0.0.0`
+ואינה בודקת עדכונים בכלל.
+
 ### פעולות חוסמות
 
 `SubsetBuilder.build`, `PatchFilter.filter`, `SubsetHasher.compute`,
