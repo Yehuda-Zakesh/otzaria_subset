@@ -24,7 +24,8 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 class SubsetHasher {
   final LogicalContentHasher _hasher;
 
-  const SubsetHasher({LogicalContentHasher hasher = const LogicalContentHasher()})
+  const SubsetHasher(
+      {LogicalContentHasher hasher = const LogicalContentHasher()})
       : _hasher = hasher;
 
   /// הקידומת שמסמנת "זה hash של מסד חלקי".

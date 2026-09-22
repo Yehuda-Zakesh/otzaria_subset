@@ -1,0 +1,63 @@
+name: test
+
+# בדיקות ואנליזה על כל push ל-main, ובדרישה ידנית.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout otzaria_subset
+        uses: actions/checkout@v4
+
+      # שני ה-pubspec (root ו-app) תלויים ב-seforim_library_updater
+      # דרך path dependency ל-../Otzariya_update. בלי השכפול הזה שום
+      # דבר לא מתקמפל.
+      - name: Clone seforim_library_updater (Otzariya_update)
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/Otzaria/Otzaria_Offline_update.git ..\Otzariya_update
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: flutter pub get (root)
+        shell: pwsh
+        run: flutter pub get
+
+      - name: flutter pub get (app)
+        shell: pwsh
+        working-directory: app
+        run: flutter pub get
+
+      # ‏`dart format .` מהשורש היה מנסה לפרמט גם את app/, שהיא חבילה
+      # נפרדת עם pubspec משלה — לכן מגבילים כל הרצה לתיקיות של החבילה שלה.
+      - name: dart format --set-exit-if-changed (root)
+        shell: pwsh
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: dart format --set-exit-if-changed (app)
+        shell: pwsh
+        working-directory: app
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: flutter analyze (root)
+        shell: pwsh
+        run: flutter analyze --no-fatal-infos
+
+      # ‏analysis_options.yaml בשורש מוציא במפורש את app/** מהאנליזה שלו,
+      # כי זו חבילה נפרדת — לכן צריך להריץ analyze משם בנפרד.
+      - name: flutter analyze (app)
+        shell: pwsh
+        working-directory: app
+        run: flutter analyze --no-fatal-infos
+
+      - name: flutter test (root)
+        shell: pwsh
+        run: flutter test

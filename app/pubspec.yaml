@@ -1,0 +1,42 @@
+name: otzaria_subset_app
+description: >-
+  ממשק המשתמש למנוע הספרייה החלקית: בחירת ספרים, בנייה, עדכון ואימות.
+  המנוע עצמו יושב ב-`otzaria_subset` ונשאר חבילת לוגיקה בלי תלות ב-UI.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.2.6 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  otzaria_subset:
+    path: ../
+  seforim_library_updater:
+    path: ../../Otzariya_update
+  ffi: ^2.1.3
+  file_selector: ^1.0.3
+  http: ^1.2.2
+  hive_ce: ^2.19.3
+  # איתור המסד וההגדרות של אוצריא מגיע משם ולא משוכפל כאן: הוא קורא
+  # את קופסת ה-Hive שלה ומכיר גם התקנה ניידת והתקנת מנהל.
+  library_manager:
+    path: ../../Otzariya_update/library_manager
+  path: ^1.9.1
+  path_provider: ^2.1.4
+  sqlite3: ^3.3.3
+  sqlite3_flutter_libs: ^0.5.24
+  # ‏zstandard מביא את ה-DLL ליד ה-exe; zstandard_native הוא ה-FFI הטהור
+  # שמעליו בנוי הפירוק בהזרמה.
+  zstandard: ^1.3.26
+  zstandard_native: ^1.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

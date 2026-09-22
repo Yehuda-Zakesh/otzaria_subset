@@ -10,6 +10,8 @@ analyzer:
     public_member_api_docs: ignore
   exclude:
     - build/**
+    # ‏`app/` היא חבילה נפרדת עם pubspec ו-analysis_options משלה.
+    - app/**
 
 linter:
   rules:

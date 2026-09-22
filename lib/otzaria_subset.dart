@@ -19,6 +19,16 @@ export 'src/engine/index_invalidator.dart'
         OtzariaIndexInvalidator,
         IndexInvalidationResult,
         IndexInvalidationException;
+export 'src/engine/removal_plan.dart' show RemovalSelection, keepSpecFor;
+export 'src/engine/library_catalog.dart'
+    show
+        LibraryCatalog,
+        CatalogCategory,
+        CatalogBook,
+        LibraryStats,
+        readCatalog,
+        readCatalogFromPath,
+        readLibraryStats;
 export 'src/engine/keep_set.dart'
     show KeepSet, CategoryKeepSet, categoryPruneWhere;
 export 'src/engine/patch_filter.dart'
@@ -44,7 +54,7 @@ export 'src/models/table_scope.dart'
         kTableScopeByName,
         kGlobalTables,
         scopeFor;
-export 'src/store/machine_identity.dart'
-    show MachineIdentity, MachineRegistry;
-export 'src/store/profile_store.dart'
-    show ProfileStore, ProfileStoreException;
+export 'src/store/machine_identity.dart' show MachineIdentity, MachineRegistry;
+export 'src/store/otzaria_update_guard.dart'
+    show OtzariaUpdateGuard, OtzariaUpdateSettings;
+export 'src/store/profile_store.dart' show ProfileStore, ProfileStoreException;

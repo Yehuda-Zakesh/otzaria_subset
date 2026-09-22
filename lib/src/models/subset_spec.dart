@@ -28,8 +28,7 @@ class SubsetSpec {
   /// ספרייה ריקה — נקודת הפתיחה של פרופיל חדש.
   static const SubsetSpec empty = SubsetSpec();
 
-  bool get isEmpty =>
-      categoryIds.isEmpty && includeBookIds.isEmpty;
+  bool get isEmpty => categoryIds.isEmpty && includeBookIds.isEmpty;
 
   SubsetSpec copyWith({
     Set<int>? categoryIds,
@@ -54,9 +53,8 @@ class SubsetSpec {
         excludeBookIds: _intSet(json['excludeBookIds']),
       );
 
-  static Set<int> _intSet(Object? raw) => raw is List
-      ? raw.map((e) => (e as num).toInt()).toSet()
-      : const <int>{};
+  static Set<int> _intSet(Object? raw) =>
+      raw is List ? raw.map((e) => (e as num).toInt()).toSet() : const <int>{};
 
   @override
   bool operator ==(Object other) =>

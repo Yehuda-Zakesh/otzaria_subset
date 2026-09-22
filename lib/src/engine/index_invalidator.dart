@@ -117,8 +117,7 @@ class OtzariaIndexInvalidator {
   }
 
   /// האם האינדקס הגיע מוכן מראש מה-installer.
-  bool isPrebuilt(String dir) =>
-      File(p.join(dir, prebuiltMarker)).existsSync();
+  bool isPrebuilt(String dir) => File(p.join(dir, prebuiltMarker)).existsSync();
 
   /// מוחק את תיקיית האינדקס, כך שאוצריא תבנה אותה מחדש מהספרייה החלקית.
   ///

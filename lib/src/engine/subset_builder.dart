@@ -107,6 +107,17 @@ class SubsetBuilder {
       db.execute('PRAGMA journal_mode = OFF');
       db.execute('PRAGMA synchronous = OFF');
       db.execute('PRAGMA foreign_keys = OFF');
+      // ‏מטמון של 256MB במקום 2MB כברירת מחדל. בניית האינדקסים בסוף
+      // ממיינת מיליוני שורות, ומטמון קטן שולח כל מיון לדיסק — זה ההפרש
+      // בין דקות לעשרות דקות, והזיכרון משוחרר בסגירת החיבור.
+      db.execute('PRAGMA cache_size = -262144');
+      // מיון האינדקסים ב-RAM ולא בקובץ זמני על הדיסק.
+      db.execute('PRAGMA temp_store = MEMORY');
+      // קריאת המקור דרך מיפוי זיכרון חוסכת העתקה לכל בלוק. הכישלון כאן
+      // אינו קריטי — מערכת שאינה תומכת פשוט תקרא כרגיל.
+      try {
+        db.execute('PRAGMA full.mmap_size = 1073741824');
+      } catch (_) {}
       _runDdl(db, "type='table'");
 
       onStage?.call('copy');
@@ -130,6 +141,10 @@ class SubsetBuilder {
       // בכל אחד מהם — כולל המקור, שמחובר לקריאה בלבד. לכן הוא רץ אחרי
       // ה-DETACH, ומוסמך ל-main בכל מקרה.
       onStage?.call('analyze');
+      // ‏`ANALYZE` מלא סורק כל אינדקס מקצה לקצה, וזה שווה בזמן לבנייה
+      // עצמה. `analysis_limit` עוצר כל אינדקס אחרי מדגם — הסטטיסטיקה
+      // נשארת טובה דיה למתכנן השאילתות, וזה מה שהיא צריכה להיות.
+      db.execute('PRAGMA analysis_limit = 1000');
       db.execute('ANALYZE main');
 
       onStage?.call('verify');
@@ -207,8 +222,8 @@ class SubsetBuilder {
         final cols = _columns(db, 'full', scope.name);
         if (cols.isEmpty) continue;
         final csv = cols.map((c) => '"$c"').join(',');
-        final where = categoryPruneWhere(scope.name, pruneCategories) ??
-            _whereFor(scope);
+        final where =
+            categoryPruneWhere(scope.name, pruneCategories) ?? _whereFor(scope);
         db.execute(
           'INSERT INTO main."${scope.name}" ($csv) '
           'SELECT $csv FROM full."${scope.name}" $where',
@@ -269,12 +284,10 @@ class SubsetBuilder {
     }
   }
 
-  bool _hasTable(sqlite3.Database db, String schema, String name) => db
-      .select(
+  bool _hasTable(sqlite3.Database db, String schema, String name) => db.select(
         "SELECT 1 FROM $schema.sqlite_master WHERE type='table' AND name=? LIMIT 1",
         [name],
-      )
-      .isNotEmpty;
+      ).isNotEmpty;
 
   List<String> _columns(sqlite3.Database db, String schema, String table) => db
       .select('PRAGMA $schema.table_info("$table")')

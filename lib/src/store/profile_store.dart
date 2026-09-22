@@ -132,6 +132,5 @@ class ProfileStore {
     return profile;
   }
 
-  File _fileFor(String id) =>
-      File(p.join(directory.path, '$id$_extension'));
+  File _fileFor(String id) => File(p.join(directory.path, '$id$_extension'));
 }

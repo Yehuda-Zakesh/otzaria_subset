@@ -120,8 +120,7 @@ class SubsetProfile {
       schemaVersion: (json['schemaVersion'] as num?)?.toInt(),
       subsetHash: json['subsetHash'] as String?,
       dbPath: json['dbPath'] as String?,
-      lastAppliedAt:
-          rawDate is String ? DateTime.tryParse(rawDate) : null,
+      lastAppliedAt: rawDate is String ? DateTime.tryParse(rawDate) : null,
       severedLinkCount: (json['severedLinkCount'] as num?)?.toInt() ?? 0,
       categoriesPruned: json['categoriesPruned'] == true,
     );

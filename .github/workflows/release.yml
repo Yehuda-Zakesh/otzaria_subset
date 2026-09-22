@@ -1,0 +1,129 @@
+name: release
+
+# שחרור גרסה: אך ורק ידני. אסור שיקרה על push, כדי שלא נשחרר גרסה
+# בטעות על כל מיזוג ל-main.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout otzaria_subset
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # שני ה-pubspec (root ו-app) תלויים ב-seforim_library_updater
+      # דרך path dependency ל-../Otzariya_update. בלי השכפול הזה שום
+      # דבר לא מתקמפל.
+      - name: Clone seforim_library_updater (Otzariya_update)
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/Otzaria/Otzaria_Offline_update.git ..\Otzariya_update
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      # מעלים patch אחד בשני ה-pubspec יחד — הם חייבים להישאר בנעילה
+      # הדדית (lockstep). אם הם כבר לא תואמים לפני העדכון, עדיף להיכשל
+      # בקול רם מאשר לשחרר גרסה לא עקבית.
+      - name: Bump patch version (root + app, in lockstep)
+        id: bump-version
+        shell: pwsh
+        run: |
+          $rootPath = "pubspec.yaml"
+          $appPath  = "app/pubspec.yaml"
+
+          $rootContent = Get-Content $rootPath -Raw
+          $appContent  = Get-Content $appPath -Raw
+
+          $versionPattern = '(?m)^version:\s*(\d+)\.(\d+)\.(\d+)\s*$'
+          $rootMatch = [regex]::Match($rootContent, $versionPattern)
+          $appMatch  = [regex]::Match($appContent, $versionPattern)
+
+          if (-not $rootMatch.Success) { throw "לא נמצאה שורת version תקנית ב-$rootPath" }
+          if (-not $appMatch.Success)  { throw "לא נמצאה שורת version תקנית ב-$appPath" }
+
+          $rootVersion = "$($rootMatch.Groups[1].Value).$($rootMatch.Groups[2].Value).$($rootMatch.Groups[3].Value)"
+          $appVersion  = "$($appMatch.Groups[1].Value).$($appMatch.Groups[2].Value).$($appMatch.Groups[3].Value)"
+
+          if ($rootVersion -ne $appVersion) {
+            throw "גרסאות לא תואמות: root=$rootVersion, app=$appVersion — עוצרים לפני שמעדכנים כלום"
+          }
+
+          $newPatch = [int]$rootMatch.Groups[3].Value + 1
+          $newVersion = "$($rootMatch.Groups[1].Value).$($rootMatch.Groups[2].Value).$newPatch"
+
+          $newRootContent = [regex]::Replace($rootContent, $versionPattern, "version: $newVersion")
+          $newAppContent  = [regex]::Replace($appContent,  $versionPattern, "version: $newVersion")
+
+          Set-Content -Path $rootPath -Value $newRootContent -NoNewline -Encoding utf8
+          Set-Content -Path $appPath  -Value $newAppContent  -NoNewline -Encoding utf8
+
+          Write-Host "Version bumped: $rootVersion -> $newVersion"
+          "version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+
+      - name: flutter pub get (root)
+        shell: pwsh
+        run: flutter pub get
+
+      - name: flutter pub get (app)
+        shell: pwsh
+        working-directory: app
+        run: flutter pub get
+
+      # לא משחררים בנייה שבורה — הבדיקות של החבילה הן ההוכחה שהמסנן נכון.
+      - name: flutter test (root)
+        shell: pwsh
+        run: flutter test
+
+      - name: flutter build windows --release (app)
+        shell: pwsh
+        working-directory: app
+        run: flutter build windows --release
+
+      - name: Ensure Inno Setup is installed
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe not found at $iscc after installing Inno Setup"
+          }
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=${{ steps.bump-version.outputs.version }}" "installer\otzaria_subset.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC נכשל עם קוד יציאה $LASTEXITCODE" }
+
+      - name: Commit version bump and tag
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pubspec.yaml app/pubspec.yaml
+          git commit -m "עדכון גרסה ל-${{ steps.bump-version.outputs.version }}"
+          git tag "v${{ steps.bump-version.outputs.version }}"
+          git push origin HEAD:main
+          git push origin "v${{ steps.bump-version.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump-version.outputs.version }}
+          name: v${{ steps.bump-version.outputs.version }}
+          files: installer/output/otzaria-subset-setup-${{ steps.bump-version.outputs.version }}.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

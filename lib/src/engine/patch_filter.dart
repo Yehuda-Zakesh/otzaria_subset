@@ -149,7 +149,8 @@ class PatchFilter {
             "AND name='migrations' LIMIT 1")
         .isNotEmpty;
     if (!has) return;
-    final n = db.select('SELECT COUNT(*) c FROM p.migrations').first['c'] as int;
+    final n =
+        db.select('SELECT COUNT(*) c FROM p.migrations').first['c'] as int;
     if (n > 0) {
       throw PatchFilterException(
         'ה-patch מכיל $n מיגרציות סכמה. מיגרציה נכתבת בהנחה שהמסד שלם, '
@@ -252,8 +253,9 @@ class PatchFilter {
         final present =
             scope.bookColumns.where((c) => cols.contains(c)).toList();
         if (present.length == scope.bookColumns.length) {
-          final terms =
-              present.map((c) => '"$c" IN (${KeepSet.selectIds})').join(' AND ');
+          final terms = present
+              .map((c) => '"$c" IN (${KeepSet.selectIds})')
+              .join(' AND ');
           return 'WHERE $terms';
         }
         return _fallbackToLocalPk(scope, cols);
@@ -333,12 +335,10 @@ class PatchFilter {
     return null;
   }
 
-  bool _has(sqlite3.Database db, String schema, String name) => db
-      .select(
+  bool _has(sqlite3.Database db, String schema, String name) => db.select(
         "SELECT 1 FROM $schema.sqlite_master WHERE type='table' AND name=? LIMIT 1",
         [name],
-      )
-      .isNotEmpty;
+      ).isNotEmpty;
 
   List<String> _columns(sqlite3.Database db, String schema, String table) => db
       .select('PRAGMA $schema.table_info("$table")')

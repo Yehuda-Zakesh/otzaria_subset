@@ -147,8 +147,7 @@ class SubsetUpdater {
         subsetPath: subsetPath,
         outputPath: filtered.path,
         bookIds: resolution.keep,
-        keepCategoryIds:
-            categoriesPruned ? resolution.keepCategories : null,
+        keepCategoryIds: categoriesPruned ? resolution.keepCategories : null,
       );
 
       // ── ההחלה על העתק, לא על המקור ──

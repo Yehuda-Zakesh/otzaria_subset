@@ -1,12 +1,17 @@
 # CLAUDE.md
 
 חוזה העבודה המלא על הריפו הזה נמצא ב-[AGENTS.md](AGENTS.md) — יש לקרוא
-אותו לפני כל שינוי. הוא מפרט מה החבילה עושה, ואת המוקשים שאסור לשבור.
+אותו לפני כל שינוי. הוא מפרט מה כל חבילה עושה, ואת המוקשים שאסור לשבור.
 
 שלושת הכללים שחלים על **כל** שינוי:
 
 1. **`dart format .` ואז `flutter analyze --no-fatal-infos`** — האנליזה
-   חייבת לחזור נקייה לגמרי, כולל `info`.
+   חייבת לחזור נקייה לגמרי, כולל `info`. **הריפו הוא שתי חבילות
+   נפרדות**: השורש (`otzaria_subset`, המנוע) ו-`app/`
+   (`otzaria_subset_app`, אפליקציית Windows) — כל אחת עם `pubspec.yaml`
+   ו-`analysis_options.yaml` משלה. יש להריץ `dart format` ו-`flutter
+   analyze` **בשתיהן**; `analysis_options.yaml` בשורש מוציא במפורש את
+   `app/**` מהאנליזה שלו.
 2. **`flutter test` חייב לעבור במלואו**, ובמיוחד
    `test/equivalence_test.dart` — הוא ההוכחה היחידה שהמסנן נכון. בדיקה
    שנופלת פירושה שהשינוי שגוי, לא שהבדיקה מחמירה מדי.
@@ -17,7 +22,13 @@
 * **אסור לקרוא תוכן מ-`seforim.db` אמיתי.** המכונה מאחורי סינון תוכן
   מחמיר (נטפרי). מותר לקרוא מטא-דאטה של סכמה (`sqlite_master`,
   `PRAGMA`, `dbstat`) בלבד. הבדיקות משתמשות ב-fixtures סינתטיים.
-* **אין CI ואין GitHub Actions בריפו הזה, במכוון.** אל תוסיף
-  `.github/workflows/`. כל בנייה ובדיקה רצות מקומית.
+* **יש CI, ומריצים אותו לפני שמסתמכים על בדיקה מקומית בלבד.**
+  `.github/workflows/test.yml` רץ על כל push ל-`main` (וגם בדרישה
+  ידנית): `pub get`, `dart format --set-exit-if-changed` ו-`flutter
+  analyze` בשתי החבילות, ו-`flutter test` על השורש.
+  `.github/workflows/release.yml` רץ **רק בדרישה ידנית**: מעלה patch
+  version בנעילה הדדית בשני ה-`pubspec.yaml`, מריץ את הבדיקות, בונה את
+  האפליקציה, אורז אותה עם Inno Setup
+  (`installer/otzaria_subset.iss`), ומפרסם תג ו-GitHub Release.
 
 יש להשיב למשתמש בעברית.

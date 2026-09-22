@@ -66,8 +66,7 @@ class MachineIdentity {
       final generated = _newGuid();
       file.parent.createSync(recursive: true);
       file.writeAsStringSync(generated, flush: true);
-      return MachineIdentity(
-          id: generated, hostname: host, platform: platform);
+      return MachineIdentity(id: generated, hostname: host, platform: platform);
     } catch (_) {
       // זהות חולפת: יציבה כל עוד שם המחשב יציב.
       return MachineIdentity(

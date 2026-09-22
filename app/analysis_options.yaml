@@ -1,0 +1,19 @@
+# ‏אותו חוזה כמו המנוע: אנליזה נקייה לגמרי, כולל info.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    public_member_api_docs: ignore
+  exclude:
+    - build/**
+    - windows/**
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_print
+    - prefer_final_locals
+    - unawaited_futures

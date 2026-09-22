@@ -146,8 +146,8 @@ const List<TableScope> kTableScopesInFkOrder = [
   TableScope.byBook('alt_toc_structure', ['bookId']),
   // ‏parentId הוא הפניה עצמית בתוך אותו מבנה, ו-textId מצביע ל-tocText
   // שנשמרת במלואה — די בבדיקת המבנה.
-  TableScope.byParent('alt_toc_entry',
-      [ParentRef('structureId', 'alt_toc_structure', 'id')]),
+  TableScope.byParent(
+      'alt_toc_entry', [ParentRef('structureId', 'alt_toc_structure', 'id')]),
   TableScope.byParent('line_alt_toc', [
     ParentRef('lineId', 'line', 'id'),
     ParentRef('structureId', 'alt_toc_structure', 'id'),

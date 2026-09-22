@@ -67,8 +67,8 @@ class SubsetResolver {
     // הסגור: אב → צאצאים, וצאצא → אבות.
     final descendantsOf = <int, Set<int>>{};
     final ancestorsOf = <int, Set<int>>{};
-    for (final row in db.select(
-        'SELECT ancestorId, descendantId FROM category_closure')) {
+    for (final row
+        in db.select('SELECT ancestorId, descendantId FROM category_closure')) {
       final a = row['ancestorId'] as int;
       final d = row['descendantId'] as int;
       (descendantsOf[a] ??= <int>{}).add(d);
@@ -166,8 +166,7 @@ class SubsetResolver {
       // ספר שה-patch מוחק יורד מהבחירה גם אם הכלל עוד בוחר אותו — אחרת
       // הוא היה נשאר ברשימה ומייצר ציפייה לשורות שלא יגיעו.
       if (_has(subsetDb, 'praw', 'delete_book')) {
-        for (final row
-            in subsetDb.select('SELECT id FROM praw.delete_book')) {
+        for (final row in subsetDb.select('SELECT id FROM praw.delete_book')) {
           ids.remove(row['id'] as int);
         }
       }
@@ -310,12 +309,10 @@ class SubsetResolver {
     return sql;
   }
 
-  bool _has(sqlite3.Database db, String schema, String name) => db
-      .select(
+  bool _has(sqlite3.Database db, String schema, String name) => db.select(
         "SELECT 1 FROM $schema.sqlite_master WHERE type='table' AND name=? LIMIT 1",
         [name],
-      )
-      .isNotEmpty;
+      ).isNotEmpty;
 
   /// פותר את הכלל במלואו, כולל אומדן גודל ודוח ניתוק.
   ///
@@ -357,9 +354,8 @@ class SubsetResolver {
     // מכדי להצדיק שאילתת dbstat, שהיא סריקה מלאה.
     const globalFloorBytes = 20 * 1024 * 1024;
 
-    final bytesPerLine = totalLines > 0
-        ? (totalBytes - globalFloorBytes) / totalLines
-        : 0.0;
+    final bytesPerLine =
+        totalLines > 0 ? (totalBytes - globalFloorBytes) / totalLines : 0.0;
     return _SizeCalibration(
       bytesPerLine: bytesPerLine < 0 ? 0 : bytesPerLine,
       globalFloorBytes: globalFloorBytes,
@@ -381,13 +377,15 @@ class SubsetResolver {
   /// מדיניות הניתוק היא סימטרית: קישור נשמר רק כששני צדיו בבחירה, ולכן
   /// גם קישור *נכנס* מספר שלא נבחר נחשב מנותק.
   int _countSeveredLinks(sqlite3.Database db) {
-    final row = db.select(
-      'SELECT COUNT(*) c FROM link '
-      'WHERE (sourceBookId IN (${KeepSet.selectIds}) '
-      '       AND targetBookId NOT IN (${KeepSet.selectIds})) '
-      '   OR (targetBookId IN (${KeepSet.selectIds}) '
-      '       AND sourceBookId NOT IN (${KeepSet.selectIds}))',
-    ).first;
+    final row = db
+        .select(
+          'SELECT COUNT(*) c FROM link '
+          'WHERE (sourceBookId IN (${KeepSet.selectIds}) '
+          '       AND targetBookId NOT IN (${KeepSet.selectIds})) '
+          '   OR (targetBookId IN (${KeepSet.selectIds}) '
+          '       AND sourceBookId NOT IN (${KeepSet.selectIds}))',
+        )
+        .first;
     return row['c'] as int;
   }
 

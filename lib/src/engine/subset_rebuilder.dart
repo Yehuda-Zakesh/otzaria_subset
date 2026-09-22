@@ -240,10 +240,31 @@ class SubsetRebuilder {
       try {
         staged.renameSync(target.path);
       } catch (_) {
-        if (hadTarget) backup.renameSync(target.path);
+        // שחזור שנכשל בעצמו אינו רשאי להסתיר את הסיבה המקורית: בלעדיה
+        // אי אפשר להבין למה ההחלפה נפלה, והמשתמש נשאר עם ספרייה שיושבת
+        // רק ב-`.bak` בלי שאף אחד אמר לו איפה היא.
+        if (hadTarget) {
+          try {
+            backup.renameSync(target.path);
+          } catch (restoreError) {
+            throw SubsetRebuildException(
+              'החלפת הספרייה נכשלה, וגם השחזור נכשל. הספרייה הקודמת '
+              'נמצאת ב-${backup.path} ואפשר לשנות את שמה בחזרה '
+              'ל-${target.path}. השגיאה: $restoreError',
+            );
+          }
+        }
         rethrow;
       }
-      if (hadTarget) backup.deleteSync();
+      // מכאן ואילך ההחלפה **הצליחה**. מחיקת הגיבוי היא ניקיון בלבד,
+      // וכשל שלה אינו הופך בנייה מוצלחת לכישלון — הוא רק משאיר קובץ.
+      if (hadTarget) {
+        try {
+          backup.deleteSync();
+        } catch (_) {}
+      }
+    } on SubsetRebuildException {
+      rethrow;
     } catch (e) {
       throw SubsetRebuildException('החלפת הספרייה נכשלה: $e');
     }
