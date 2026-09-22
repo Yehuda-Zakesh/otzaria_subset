@@ -1,0 +1,25 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+pubspec.lock
+*.iml
+.idea/
+.vscode/
+
+# ‏CI אינו בשימוש בריפו הזה במכוון — ראו AGENTS.md.
+.github/workflows/
+
+# מסדי נתונים ותוצרי בנייה. אסור שיגיעו לריפו: `seforim.db` הוא 7.4GB
+# של תוכן שאינו שלנו, ותת-קבוצה שלו אינה שונה בכך.
+*.db
+*.db-shm
+*.db-wal
+*.db.bak
+*.db.zst
+*.staging.db
+*.filtered.db
+
+# תיקיות עבודה זמניות
+/tmp/
+/work/

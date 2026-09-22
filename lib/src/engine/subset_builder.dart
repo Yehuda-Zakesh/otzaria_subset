@@ -1,0 +1,296 @@
+import 'dart:io';
+
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
+
+import '../models/table_scope.dart';
+import 'keep_set.dart';
+import 'sqlite_uri.dart';
+
+/// נזרק כשבנייה נכשלה. קובץ היעד נמחק לפני הזריקה — אין תת-קבוצה חלקית
+/// שנראית תקינה.
+class SubsetBuildException implements Exception {
+  final String message;
+  const SubsetBuildException(this.message);
+  @override
+  String toString() => 'SubsetBuildException: $message';
+}
+
+/// תוצאת בנייה מוצלחת.
+class SubsetBuildResult {
+  /// כמה שורות הועתקו, לפי טבלה.
+  final Map<String, int> rowsCopied;
+
+  /// גודל קובץ התוצאה בבייטים.
+  final int resultBytes;
+
+  /// גרסת ה-DB וגרסת הסכמה שנקראו מ-`schema_meta` של המקור.
+  final int? dbVersion;
+  final int? schemaVersion;
+
+  const SubsetBuildResult({
+    required this.rowsCopied,
+    required this.resultBytes,
+    required this.dbVersion,
+    required this.schemaVersion,
+  });
+
+  int get totalRows => rowsCopied.values.fold(0, (a, b) => a + b);
+}
+
+/// בונה `seforim.db` חלקי מתוך מסד מלא, לפי קבוצת מזהי ספרים.
+///
+/// **היעד הוא החיבור הראשי; המקור מחובר לקריאה בלבד.** הסדר הזה אינו
+/// שרירותי: SQLite מוריש את דגל הקריאה-בלבד מהחיבור הראשי לכל מסד מחובר,
+/// ולכן חיבור שנפתח read-only אינו יכול לכתוב גם ליעד כתיב. ההגנה על מסד
+/// המשתמש באה מ-`mode=ro` ב-URI של ה-`ATTACH` — ראו [readOnlyUri].
+///
+/// ה-DDL נוצר ביעד **אות-באות** מ-`sqlite_master` של המקור, בלי הסמכה
+/// לסכמה: פקודה לא-מוסמכת רצה בחיבור הראשי, שהוא היעד. כך התוצאה נושאת
+/// את אותה סכמה בדיוק, כולל `WITHOUT ROWID` ואילוצי `UNIQUE`.
+///
+/// אינדקסים נוצרים **אחרי** ההעתקה. יצירתם מראש הייתה מאטה כל `INSERT`
+/// בשמירת עץ B נוסף לכל שורה, ועל 4.7GB של `line` זה הבדל של סדר גודל.
+///
+/// סינכרוני וחוסם — הרץ ב-`Isolate.run`.
+class SubsetBuilder {
+  const SubsetBuilder();
+
+  /// בונה תת-קבוצה של [bookIds] מ-[sourcePath] אל [targetPath].
+  ///
+  /// [targetPath] חייב להיות פנוי; קובץ קיים הוא שגיאה ולא דריסה, כדי
+  /// שבנייה לא תמחק ספרייה עובדת של המשתמש.
+  ///
+  /// [onStage] מדווח שם שלב, [onTable] מדווח טבלה וכמה שורות הועתקו בה.
+  /// [keepCategoryIds] — גיזום עץ הקטגוריות. `null` שומר את העץ **במלואו**
+  /// (ברירת המחדל, והתנהגות אוצריא המקורית). כשמסופק, `category`
+  /// ו-`category_closure` מסוננות אליו — ראו `CategoryKeepSet` להסבר למה
+  /// דווקא שתי הטבלאות האלה מותרות בגיזום, ומה הכלל שקובע מה נשאר.
+  ///
+  /// חשוב: הקבוצה חייבת להכיל את הקטגוריות של **כל** הספרים ב-[bookIds]
+  /// ואת אבותיהן, אחרת `book.categoryId` יצביע לשורה שאינה שם
+  /// וה-`foreign_key_check` בסוף יזרוק. `SubsetResolver.resolveCategoryIds`
+  /// מחשב קבוצה כזו.
+  SubsetBuildResult build({
+    required String sourcePath,
+    required String targetPath,
+    required Set<int> bookIds,
+    Set<int>? keepCategoryIds,
+    void Function(String stage)? onStage,
+    void Function(String table, int rows)? onTable,
+  }) {
+    if (!File(sourcePath).existsSync()) {
+      throw SubsetBuildException('מסד המקור אינו קיים: $sourcePath');
+    }
+    final target = File(targetPath);
+    if (target.existsSync()) {
+      throw SubsetBuildException('קובץ היעד כבר קיים: $targetPath');
+    }
+    if (!target.parent.existsSync()) {
+      target.parent.createSync(recursive: true);
+    }
+
+    // ‏uri: true נדרש כדי ש-mode=ro ב-ATTACH ייחשב בכלל. בלעדיו SQLite
+    // מחפש קובץ שנקרא ממש "file:...?mode=ro", לא מוצא, ויוצר מסד ריק —
+    // כשל שקט שהיה מייצר תת-קבוצה ריקה בלי הודעה.
+    final db = sqlite3.sqlite3.open(targetPath, uri: true);
+    var attached = false;
+    try {
+      db.execute('ATTACH DATABASE ? AS full', [readOnlyUri(sourcePath)]);
+      attached = true;
+
+      onStage?.call('preflight');
+      _assertAllTablesClassified(db);
+      final dbVersion = _readMetaInt(db, 'db_version');
+      final schemaVersion = _readMetaInt(db, 'db_schema_version');
+
+      onStage?.call('schema');
+      db.execute('PRAGMA journal_mode = OFF');
+      db.execute('PRAGMA synchronous = OFF');
+      db.execute('PRAGMA foreign_keys = OFF');
+      _runDdl(db, "type='table'");
+
+      onStage?.call('copy');
+      KeepSet.install(db, bookIds);
+      if (keepCategoryIds != null) {
+        CategoryKeepSet.install(db, keepCategoryIds);
+      }
+      final rows = _copyRows(
+        db,
+        pruneCategories: keepCategoryIds != null,
+        onTable: onTable,
+      );
+
+      onStage?.call('indexes');
+      _runDdl(db, "type IN ('index','view','trigger')");
+
+      db.execute('DETACH DATABASE full');
+      attached = false;
+
+      // ‏`ANALYZE` בלי שם סכמה מנתח **כל** מסד מחובר וכותב `sqlite_stat1`
+      // בכל אחד מהם — כולל המקור, שמחובר לקריאה בלבד. לכן הוא רץ אחרי
+      // ה-DETACH, ומוסמך ל-main בכל מקרה.
+      onStage?.call('analyze');
+      db.execute('ANALYZE main');
+
+      onStage?.call('verify');
+      _verify(db);
+
+      return SubsetBuildResult(
+        rowsCopied: rows,
+        resultBytes: target.lengthSync(),
+        dbVersion: dbVersion,
+        schemaVersion: schemaVersion,
+      );
+    } catch (_) {
+      // תת-קבוצה חלקית מסוכנת יותר מכלום: היא נראית כמו ספרייה עובדת.
+      if (attached) {
+        try {
+          db.execute('DETACH DATABASE full');
+        } catch (_) {}
+      }
+      db.close();
+      try {
+        if (target.existsSync()) target.deleteSync();
+      } catch (_) {}
+      rethrow;
+    } finally {
+      db.close();
+    }
+  }
+
+  /// מריץ ביעד את הצהרות ה-DDL של המקור שתואמות את [filter].
+  void _runDdl(sqlite3.Database db, String filter) {
+    final statements = [
+      for (final row in db.select(
+        'SELECT sql FROM full.sqlite_master WHERE $filter '
+        "AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL",
+      ))
+        row['sql'] as String,
+    ];
+    for (final sql in statements) {
+      db.execute(sql);
+    }
+  }
+
+  /// טבלה בסכמת המקור שאינה מסווגת ב-[kTableScopesInFkOrder] פירושה סכמה
+  /// חדשה שהמנוע אינו מכיר. **עוצרים בקול** — ההתנהגות השקטה (להשמיט
+  /// אותה) הייתה מייצרת ספרייה חסרה בלי שאף אחד יידע.
+  void _assertAllTablesClassified(sqlite3.Database db) {
+    final unknown = <String>[];
+    for (final row in db.select(
+      "SELECT name FROM full.sqlite_master WHERE type='table' "
+      "AND name NOT LIKE 'sqlite_%'",
+    )) {
+      final name = row['name'] as String;
+      if (scopeFor(name) == null) unknown.add(name);
+    }
+    if (unknown.isNotEmpty) {
+      throw SubsetBuildException(
+        'טבלאות שאינן מסווגות במנוע: ${unknown.join(", ")}. '
+        'הסכמה התקדמה — יש לסווג אותן ב-kTableScopesInFkOrder לפני שאפשר '
+        'לבנות ספרייה חלקית ממסד כזה.',
+      );
+    }
+  }
+
+  /// מעתיק את השורות שבתחום, בסדר מפתח זר.
+  Map<String, int> _copyRows(
+    sqlite3.Database db, {
+    required bool pruneCategories,
+    void Function(String table, int rows)? onTable,
+  }) {
+    final counts = <String, int>{};
+    db.execute('BEGIN');
+    try {
+      for (final scope in kTableScopesInFkOrder) {
+        if (!_hasTable(db, 'full', scope.name)) continue;
+        final cols = _columns(db, 'full', scope.name);
+        if (cols.isEmpty) continue;
+        final csv = cols.map((c) => '"$c"').join(',');
+        final where = categoryPruneWhere(scope.name, pruneCategories) ??
+            _whereFor(scope);
+        db.execute(
+          'INSERT INTO main."${scope.name}" ($csv) '
+          'SELECT $csv FROM full."${scope.name}" $where',
+        );
+        final n = db.updatedRows;
+        counts[scope.name] = n;
+        onTable?.call(scope.name, n);
+      }
+      db.execute('COMMIT');
+    } catch (_) {
+      try {
+        db.execute('ROLLBACK');
+      } catch (_) {}
+      rethrow;
+    }
+    return counts;
+  }
+
+  /// תנאי ה-`WHERE` של טבלה, לפי הסיווג שלה.
+  ///
+  /// ל-[ScopeKind.byParent] התנאי מצביע על **טבלת ההורה שביעד**
+  /// (`main.<parent>`), לא על המקור: "ההורה שרד" פירושו שהוא כבר הועתק,
+  /// וסדר ה-FK מבטיח שההעתקה שלו קדמה לזו של הצאצא.
+  String _whereFor(TableScope scope) {
+    switch (scope.kind) {
+      case ScopeKind.global:
+        return '';
+      case ScopeKind.byBook:
+        final terms = scope.bookColumns
+            .map((c) => '"$c" IN (${KeepSet.selectIds})')
+            .join(' AND ');
+        return 'WHERE $terms';
+      case ScopeKind.byParent:
+        final terms = scope.parents
+            .map((r) => '"${r.column}" IN '
+                '(SELECT "${r.parentColumn}" FROM main."${r.table}")')
+            .join(' AND ');
+        return 'WHERE $terms';
+    }
+  }
+
+  /// מוודא שהתוצאה שלמה מבחינת ייחוס. אם המנוע ניתק שורה בטעות, היא
+  /// מופיעה כאן — וזה בדיוק המקום שבו עדיף להיכשל.
+  void _verify(sqlite3.Database db) {
+    db.execute('PRAGMA foreign_keys = ON');
+    final violations = db.select('PRAGMA main.foreign_key_check');
+    if (violations.isNotEmpty) {
+      final sample = violations.take(5).map((r) => r.values.join('/'));
+      throw SubsetBuildException(
+        'הפרות מפתח זר בתת-הקבוצה (${violations.length}): '
+        '${sample.join(" · ")}',
+      );
+    }
+    final integrity =
+        db.select('PRAGMA main.quick_check').first.values.first as String;
+    if (integrity != 'ok') {
+      throw SubsetBuildException('quick_check נכשל: $integrity');
+    }
+  }
+
+  bool _hasTable(sqlite3.Database db, String schema, String name) => db
+      .select(
+        "SELECT 1 FROM $schema.sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        [name],
+      )
+      .isNotEmpty;
+
+  List<String> _columns(sqlite3.Database db, String schema, String table) => db
+      .select('PRAGMA $schema.table_info("$table")')
+      .map((r) => r['name'] as String)
+      .toList();
+
+  int? _readMetaInt(sqlite3.Database db, String key) {
+    try {
+      final rows = db.select(
+        'SELECT value FROM full.schema_meta WHERE key = ? LIMIT 1',
+        [key],
+      );
+      if (rows.isEmpty) return null;
+      return int.tryParse(rows.first['value']?.toString() ?? '');
+    } catch (_) {
+      return null;
+    }
+  }
+}
