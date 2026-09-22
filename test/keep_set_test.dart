@@ -64,9 +64,11 @@ void main() {
       for (var i = 4990; i <= 5010; i++) {
         db.execute('INSERT INTO book VALUES ($i)');
       }
-      final kept = db.select(
-        'SELECT COUNT(*) c FROM book WHERE id IN (${KeepSet.selectIds})',
-      ).first['c'];
+      final kept = db
+          .select(
+            'SELECT COUNT(*) c FROM book WHERE id IN (${KeepSet.selectIds})',
+          )
+          .first['c'];
       expect(kept, 11, reason: '4990..5000 בפנים, 5001..5010 בחוץ');
     });
 
@@ -74,8 +76,10 @@ void main() {
       KeepSet.install(db, {1});
       KeepSet.drop(db);
       expect(
-        db.select("SELECT COUNT(*) c FROM temp.sqlite_master "
-            "WHERE type='table' AND name='_keep'").first['c'],
+        db
+            .select("SELECT COUNT(*) c FROM temp.sqlite_master "
+                "WHERE type='table' AND name='_keep'")
+            .first['c'],
         0,
       );
     });
@@ -96,8 +100,10 @@ void main() {
       // אם היא הייתה ב-main היא הייתה נכתבת לקובץ התוצאה ונשארת שם.
       KeepSet.install(db, {1});
       expect(
-        db.select("SELECT COUNT(*) c FROM main.sqlite_master "
-            "WHERE name='_keep'").first['c'],
+        db
+            .select("SELECT COUNT(*) c FROM main.sqlite_master "
+                "WHERE name='_keep'")
+            .first['c'],
         0,
       );
     });

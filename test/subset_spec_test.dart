@@ -76,7 +76,9 @@ void main() {
 
     test('fromJson ממירה double ל-int', () {
       // ‏jsonDecode מחזיר double כשהמספר נכתב עם נקודה עשרונית.
-      final spec = SubsetSpec.fromJson(const {'categoryIds': [3.0, 4]});
+      final spec = SubsetSpec.fromJson(const {
+        'categoryIds': [3.0, 4]
+      });
       expect(spec.categoryIds, equals({3, 4}));
     });
   });
@@ -111,21 +113,27 @@ void main() {
         includeBookIds: {2},
         excludeBookIds: {3},
       );
-      expect(base, isNot(equals(const SubsetSpec(
-        categoryIds: {99},
-        includeBookIds: {2},
-        excludeBookIds: {3},
-      ))));
-      expect(base, isNot(equals(const SubsetSpec(
-        categoryIds: {1},
-        includeBookIds: {99},
-        excludeBookIds: {3},
-      ))));
-      expect(base, isNot(equals(const SubsetSpec(
-        categoryIds: {1},
-        includeBookIds: {2},
-        excludeBookIds: {99},
-      ))));
+      expect(
+          base,
+          isNot(equals(const SubsetSpec(
+            categoryIds: {99},
+            includeBookIds: {2},
+            excludeBookIds: {3},
+          ))));
+      expect(
+          base,
+          isNot(equals(const SubsetSpec(
+            categoryIds: {1},
+            includeBookIds: {99},
+            excludeBookIds: {3},
+          ))));
+      expect(
+          base,
+          isNot(equals(const SubsetSpec(
+            categoryIds: {1},
+            includeBookIds: {2},
+            excludeBookIds: {99},
+          ))));
     });
 
     test('אובייקטים שווים חולקים hashCode', () {
@@ -226,8 +234,7 @@ void main() {
     });
 
     test('keep ריק עם ממתינים הוא מצב חוקי', () {
-      const resolution =
-          PatchKeepResolution(keep: {}, pendingAcquisition: {7});
+      const resolution = PatchKeepResolution(keep: {}, pendingAcquisition: {7});
       expect(resolution.keep, isEmpty);
       expect(resolution.hasPending, isTrue);
     });

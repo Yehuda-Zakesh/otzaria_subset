@@ -36,7 +36,7 @@ class HomeScreen extends StatelessWidget {
       children: [
         Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
+            constraints: const BoxConstraints(maxWidth: 760),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -48,17 +48,22 @@ class HomeScreen extends StatelessWidget {
                       : (updateNotice ?? 'הספרייה מעודכנת'),
                   highlight: !checking && updateNotice != null,
                 ),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: onChooseBooks,
-                  icon: const Icon(Icons.tune_rounded),
-                  label: const Text('בחירת ספרים'),
-                ),
-                const SizedBox(height: 10),
-                TextButton.icon(
-                  onPressed: checking ? null : onCheckUpdates,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('בדיקת עדכונים'),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: onChooseBooks,
+                      icon: const Icon(Icons.tune_rounded),
+                      label: const Text('בחירת ספרים'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: checking ? null : onCheckUpdates,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('בדיקת עדכונים'),
+                    ),
+                  ],
                 ),
                 if (state.pendingAcquisition.isNotEmpty) ...[
                   const SizedBox(height: 24),
@@ -78,7 +83,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-/// כרטיס הפתיחה — המספר הגדול, ומסביבו גרדיאנט.
+/// כרטיס הפתיחה — מספרי הספרים, גודל הספרייה, ומצב עדכון.
 class _Hero extends StatelessWidget {
   final int? books;
   final int bytes;
@@ -94,51 +99,90 @@ class _Hero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(32, 36, 32, 32),
+        padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
         decoration: BoxDecoration(
-          gradient: AppTheme.hero(context),
-          borderRadius: BorderRadius.circular(28),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF4E3BC0).withValues(alpha: 0.98),
+              const Color(0xFF2D2555).withValues(alpha: 0.98),
+              const Color(0xFF1C1A33).withValues(alpha: 0.98),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(32),
           boxShadow: [
             BoxShadow(
-              color: AppColors.seed.withValues(alpha: 0.28),
-              blurRadius: 28,
-              offset: const Offset(0, 12),
+              color: const Color(0xFF281D4D).withValues(alpha: 0.28),
+              blurRadius: 30,
+              spreadRadius: 0,
+              offset: const Offset(0, 18),
             ),
           ],
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.08),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'הספרייה שלך',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 17,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 10),
             Row(
-              textBaseline: TextBaseline.alphabetic,
-              crossAxisAlignment: CrossAxisAlignment.baseline,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.auto_stories_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'הספרייה שלך',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 26),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
                   books == null ? '—' : formatCount(books!),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 54,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 58,
+                    fontWeight: FontWeight.w800,
                     height: 1,
+                    letterSpacing: -1.8,
                   ),
                 ),
-                const SizedBox(width: 10),
-                const Text(
-                  'ספרים',
-                  style: TextStyle(color: Colors.white, fontSize: 20),
+                const SizedBox(width: 12),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    'ספרים',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 24),
             Wrap(
               spacing: 10,
               runSpacing: 10,

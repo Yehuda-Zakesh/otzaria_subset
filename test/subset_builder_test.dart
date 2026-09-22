@@ -37,10 +37,8 @@ void main() {
   int rows(sqlite3.Database db, String table) =>
       db.select('SELECT COUNT(*) c FROM "$table"').first['c'] as int;
 
-  Set<Object?> colOf(sqlite3.Database db, String table, String column) => db
-      .select('SELECT "$column" FROM "$table"')
-      .map((r) => r[column])
-      .toSet();
+  Set<Object?> colOf(sqlite3.Database db, String table, String column) =>
+      db.select('SELECT "$column" FROM "$table"').map((r) => r[column]).toSet();
 
   List<String> tableNames(sqlite3.Database db) => db
       .select("SELECT name FROM sqlite_master WHERE type='table' "

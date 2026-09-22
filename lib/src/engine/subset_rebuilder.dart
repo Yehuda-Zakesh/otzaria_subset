@@ -99,6 +99,8 @@ class SubsetRebuilder {
     String? indexDir,
     void Function(String stage)? onStage,
     void Function(String table, int rows)? onTable,
+    void Function(String table, int index, int total)? onTableStart,
+    void Function(int done, int total)? onIndex,
   }) {
     final full = File(fullDbPath);
     if (!full.existsSync()) {
@@ -129,6 +131,8 @@ class SubsetRebuilder {
         keepCategoryIds: pruneCategories ? resolved.categoryIds : null,
         onStage: onStage,
         onTable: onTable,
+        onTableStart: onTableStart,
+        onIndex: onIndex,
       );
 
       onStage?.call('hash');

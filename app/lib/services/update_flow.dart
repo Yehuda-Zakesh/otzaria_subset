@@ -157,6 +157,12 @@ class SubsetUpdateFlow {
   /// [estimatedBytes] הוא אומדן גודל התוצאה, לבדיקת מקום פנוי. הבנייה
   /// יוצרת קובץ שני לצד הקיים לפני שהיא מחליפה, ולכן היא **צורכת** מקום
   /// לפני שהיא משחררת אותו — וזה המקום שבו משתמש שנשאר בלי מקום ייתקע.
+  ///
+  /// ## שני מסלולים, והמהיר נבחר מאליו
+  ///
+  /// מסד שאנחנו בנינו נגזם **במקום**: מוחקים את מה שיורד ומשחררים את
+  /// הדפים, ולכן העלות תלויה בגודל המחיקה ולא בגודל מה שנשאר. מסד שהגיע
+  /// מאוצריא אינו תומך בכך, ולכן הגזימה הראשונה היא תמיד בנייה מלאה.
   Stream<FlowProgress> prune({
     required SubsetProfile profile,
     required SubsetSpec spec,
@@ -166,6 +172,18 @@ class SubsetUpdateFlow {
     bool Function()? isCancelled,
   }) async* {
     Directory(workDir).createSync(recursive: true);
+
+    // המסלול המהיר זמין רק על מסד שאנחנו בנינו — ראו SubsetPruner.
+    if (SubsetPruner.supportsInPlace(subsetPath)) {
+      yield* _pruneInPlace(
+        profile: profile,
+        spec: spec,
+        onProfile: onProfile,
+        onOutcome: onOutcome,
+      );
+      return;
+    }
+
     if (estimatedBytes != null &&
         DiskSpaceProbe.isKnownInsufficient(subsetPath, estimatedBytes)) {
       throw FlowException(
@@ -205,8 +223,67 @@ class SubsetUpdateFlow {
             categoriesPruned: true,
           );
           onProfile(current);
-        case JobBytes():
-          break;
+        case JobBytes(:final done, :final total):
+          yield _tableProgress(done, total);
+        case JobIndex(:final done, :final total):
+          yield _indexProgress(done, total);
+      }
+    }
+
+    onOutcome(FlowOutcome(
+      profile: current,
+      pendingAcquisition: const {},
+      rebuilt: true,
+    ));
+    yield const FlowProgress(FlowStage.done, 'הסתיים.');
+  }
+
+  /// המסלול המהיר: מוחק את הספרים במקום ומשחרר את הדפים.
+  ///
+  /// ה-hash של הספרייה משתנה כאן, אבל הוא אינו מחושב מחדש: חישובו דורש
+  /// קריאה של כל המסד — בדיוק העלות שהמסלול הזה בא לחסוך. הוא מתאפס,
+  /// והעדכון הבא פשוט אינו מאמת מולו. אימות מול ערך **שגוי** היה גרוע
+  /// בהרבה מאי-אימות.
+  Stream<FlowProgress> _pruneInPlace({
+    required SubsetProfile profile,
+    required SubsetSpec spec,
+    required void Function(SubsetProfile profile) onProfile,
+    required void Function(FlowOutcome outcome) onOutcome,
+  }) async* {
+    var current = profile;
+    yield const FlowProgress(FlowStage.rebuilding, 'מוחק…');
+
+    await for (final event in runJob(
+      pruneEntry,
+      PruneArgs(
+        path: subsetPath,
+        spec: spec,
+        indexDir: indexDir,
+      ),
+    )) {
+      switch (event) {
+        case JobStage(:final stage):
+          yield FlowProgress(FlowStage.rebuilding, stageLabel(stage));
+        case JobTable(:final table, :final rows):
+          if (rows > 0) {
+            yield FlowProgress(FlowStage.rebuilding, 'מנקה $table');
+          }
+        case JobBytes(:final done, :final total):
+          yield _tableProgress(done, total);
+        case JobIndex(:final done, :final total):
+          yield _indexProgress(done, total);
+        case JobFailed(:final message):
+          throw FlowException(message);
+        case JobDone():
+          // ה-hash מתאפס: הוא כבר אינו מתאר את המסד, וחישובו מחדש היה
+          // קורא את כולו — בדיוק העלות שהמסלול הזה חוסך.
+          current = profile.copyWith(
+            clearSubsetHash: true,
+            spec: spec,
+            lastAppliedAt: DateTime.now(),
+            categoriesPruned: true,
+          );
+          onProfile(current);
       }
     }
 
@@ -361,6 +438,7 @@ class SubsetUpdateFlow {
                 onProfile(current);
               case JobTable():
               case JobBytes():
+              case JobIndex():
                 break;
             }
           }
@@ -459,8 +537,10 @@ class SubsetUpdateFlow {
               rebuild,
               categoriesPruned: true,
             ));
-          case JobBytes():
-            break;
+          case JobBytes(:final done, :final total):
+            yield _tableProgress(done, total);
+          case JobIndex(:final done, :final total):
+            yield _indexProgress(done, total);
         }
       }
     } finally {
@@ -498,7 +578,7 @@ String stageLabel(String stage) => switch (stage) {
       'verifyLocal' => 'מאמת את הספרייה הקיימת',
       'filter' => 'מסנן את העדכון לבחירה',
       'apply' => 'מחיל',
-      'hash' => 'מחשב hash',
+      'hash' => 'מסכם',
       'verify' => 'מאמת',
       'swap' => 'מחליף',
       'resolve' => 'פותר את הבחירה',
@@ -506,8 +586,11 @@ String stageLabel(String stage) => switch (stage) {
       'schema' => 'בונה סכמה',
       'copy' => 'מעתיק שורות',
       'index' => 'בונה אינדקסים',
+      'indexes' => 'בונה אינדקסים',
       'analyze' => 'מנתח',
       'invalidateIndex' => 'מבטל את אינדקס החיפוש',
+      'delete' => 'מוחק ספרים',
+      'reclaim' => 'משחרר מקום',
       'cleanup' => 'מנקה',
       _ => stage,
     };
@@ -520,3 +603,23 @@ Future<Uint8List?> decompressOneShot(Uint8List compressed) async {
     return null;
   }
 }
+
+/// הודעת התקדמות להעתקת טבלה.
+///
+/// הטבלאות אינן שוות בגודלן ולכן היחס הוא קירוב גס — אבל פס שזז הוא
+/// ההבדל בין "עובד" ל"תקוע" בעיני המשתמש, וזו הטעות שכבר קרתה כאן.
+FlowProgress _tableProgress(int done, int? total) => FlowProgress(
+      FlowStage.rebuilding,
+      total == null ? 'מעתיק טבלה $done' : 'מעתיק טבלה $done מתוך $total',
+      fraction: total == null || total == 0 ? null : done / total,
+    );
+
+/// הודעת התקדמות לבניית אינדקס.
+///
+/// שלב האינדקסים הוא הארוך ביותר אחרי ההעתקה ואין בו טבלאות לדווח
+/// עליהן — בלי המונה הזה הוא נראה כמו תקיעה אחת ארוכה.
+FlowProgress _indexProgress(int done, int total) => FlowProgress(
+      FlowStage.rebuilding,
+      'בונה אינדקס $done מתוך $total',
+      fraction: total == 0 ? null : done / total,
+    );

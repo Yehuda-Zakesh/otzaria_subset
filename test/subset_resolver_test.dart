@@ -77,8 +77,7 @@ void main() {
     test('ספר מפורש נוסף לקטגוריות', () {
       expect(
         onFull((db) => resolver.resolveBookIds(
-            db,
-            const SubsetSpec(categoryIds: {10}, includeBookIds: {3}))),
+            db, const SubsetSpec(categoryIds: {10}, includeBookIds: {3}))),
         {1, 2, 3},
       );
     });
@@ -86,8 +85,7 @@ void main() {
     test('החרגה גוברת על קטגוריה', () {
       expect(
         onFull((db) => resolver.resolveBookIds(
-            db,
-            const SubsetSpec(categoryIds: {10}, excludeBookIds: {2}))),
+            db, const SubsetSpec(categoryIds: {10}, excludeBookIds: {2}))),
         {1},
       );
     });
@@ -97,8 +95,7 @@ void main() {
       // בלי שההסרה תתבטל בעדכון הבא.
       expect(
         onFull((db) => resolver.resolveBookIds(
-            db,
-            const SubsetSpec(includeBookIds: {3}, excludeBookIds: {3}))),
+            db, const SubsetSpec(includeBookIds: {3}, excludeBookIds: {3}))),
         isEmpty,
       );
     });
@@ -110,8 +107,8 @@ void main() {
 
     test('קטגוריה שאינה קיימת אינה זורקת', () {
       expect(
-        onFull((db) => resolver.resolveBookIds(
-            db, const SubsetSpec(categoryIds: {999}))),
+        onFull((db) =>
+            resolver.resolveBookIds(db, const SubsetSpec(categoryIds: {999}))),
         isEmpty,
       );
     });
@@ -195,8 +192,8 @@ void main() {
     test('קישור ששני צדיו בחוץ אינו נספר', () {
       // בחירה {1} בלבד: קישור 3 הוא 4→2, שני הצדדים מחוץ לבחירה, ואין
       // שום משמעות ל"ניתוק" שלו — הוא לא היה שם מלכתחילה.
-      final plan = onFull((db) => resolver.resolve(
-          db, const SubsetSpec(includeBookIds: {1})));
+      final plan = onFull(
+          (db) => resolver.resolve(db, const SubsetSpec(includeBookIds: {1})));
       expect(plan.bookIds, {1});
       expect(plan.severedLinks.map((t) => t.bookId).toSet(), {2, 3});
       expect(plan.severedLinkCount, 2);
@@ -209,8 +206,7 @@ void main() {
       final db =
           sqlite3.sqlite3.open(at('full.db'), mode: sqlite3.OpenMode.readOnly);
       try {
-        final first =
-            resolver.resolve(db, const SubsetSpec(categoryIds: {10}));
+        final first = resolver.resolve(db, const SubsetSpec(categoryIds: {10}));
         final second =
             resolver.resolve(db, const SubsetSpec(categoryIds: {11}));
         expect(first.bookIds, {1, 2});

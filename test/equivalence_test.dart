@@ -275,7 +275,8 @@ void main() {
     final r = runBothPaths((db) {
       db.execute("INSERT INTO upsert_author VALUES (3, 'מחבר חדש')");
       db.execute("INSERT INTO upsert_tocText VALUES (3, 'פרק ג')");
-      db.execute("INSERT INTO upsert_category VALUES (12, 1, 'קטגוריה חדשה', 1, 3)");
+      db.execute(
+          "INSERT INTO upsert_category VALUES (12, 1, 'קטגוריה חדשה', 1, 3)");
       db.execute('INSERT INTO upsert_category_closure VALUES (1, 12)');
       db.execute('INSERT INTO upsert_category_closure VALUES (12, 12)');
       db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");

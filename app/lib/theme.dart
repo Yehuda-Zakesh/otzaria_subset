@@ -4,69 +4,162 @@ import 'package:flutter/material.dart';
 ///
 /// ## למה דווקא לא חום
 ///
-/// זו **אינה** אוצריא, והיא נוגעת בקבצים שלה. משתמש שיחשוב שזו אוצריא
+/// זו אינה אוצריא, והיא נוגעת בקבצים שלה. משתמש שיחשוב שזו אוצריא
 /// יניח שהיא אחראית למה שקורה כאן, ובדיוק כאן נמחקים ספרים. לכן הצבעים
-/// רחוקים ככל האפשר מהחום־נייר של ספרייה תורנית: סגול־אינדיגו חי,
-/// ומבטא טורקיז.
+/// רחוקים מהחום־נייר של ספרייה תורנית: סגול־אינדיגו חי ומבטא טורקיז.
 abstract final class AppColors {
-  static const Color seed = Color(0xFF6C4CE0);
-  static const Color accent = Color(0xFF00C9A7);
-  static const Color warm = Color(0xFFFF7A59);
+  static const Color seed = Color(0xFF5E4AE6);
+  static const Color accent = Color(0xFF2AC8B5);
+  static const Color accentSoft = Color(0xFFDDFBF7);
+  static const Color warm = Color(0xFFFF8C66);
+  static const Color warmSoft = Color(0xFFFFE1D5);
+  static const Color surface = Color(0xFFF9F7FF);
+  static const Color surfaceAlt = Color(0xFFF1EEFB);
+  static const Color panel = Color(0xFFEDE7FF);
+  static const Color panelDeep = Color(0xFFE2DBFF);
+  static const Color ink = Color(0xFF1C1830);
+  static const Color inkSoft = Color(0xFF5F5A72);
+  static const Color midnight = Color(0xFF11111A);
 
-  /// הגרדיאנט של כרטיס הפתיחה. שתי נקודות בלבד — יותר מזה נראה רועש.
-  static const List<Color> heroLight = [Color(0xFF7C5CFF), Color(0xFF3AC7E8)];
-  static const List<Color> heroDark = [Color(0xFF4B32B8), Color(0xFF12708A)];
+  static const List<Color> heroLight = [
+    Color(0xFF5D4BE6),
+    Color(0xFF7C6CEB),
+  ];
+  static const List<Color> heroDark = [
+    Color(0xFF2B2156),
+    Color(0xFF171A2F),
+  ];
 }
 
-/// ערכות הנושא. פינות גדולות וכרטיסים שטוחים — השפה שהמשתמש מכיר
-/// מאפליקציות שנכתבו בעשור הזה.
+abstract final class AppShadows {
+  static List<BoxShadow> soft = [
+    BoxShadow(
+      color: const Color(0xFF5E3BFF).withValues(alpha: 0.12),
+      blurRadius: 20,
+      spreadRadius: 0,
+      offset: const Offset(0, 10),
+    ),
+  ];
+
+  static List<BoxShadow> strong = [
+    BoxShadow(
+      color: const Color(0xFF1C1239).withValues(alpha: 0.18),
+      blurRadius: 32,
+      spreadRadius: 0,
+      offset: const Offset(0, 18),
+    ),
+  ];
+}
+
 abstract final class AppTheme {
   static ThemeData light() => _base(Brightness.light);
   static ThemeData dark() => _base(Brightness.dark);
 
   static ThemeData _base(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
+    final dark = brightness == Brightness.dark;
+    final baseScheme = ColorScheme.fromSeed(
       seedColor: AppColors.seed,
       brightness: brightness,
-    ).copyWith(tertiary: AppColors.accent);
-    final dark = brightness == Brightness.dark;
+    ).copyWith(
+      primary: AppColors.seed,
+      secondary: AppColors.accent,
+      tertiary: AppColors.accent,
+      surface: dark ? const Color(0xFF171421) : AppColors.surface,
+      surfaceContainerHighest:
+          dark ? const Color(0xFF231D32) : const Color(0xFFF0EAFF),
+      onSurface: dark ? const Color(0xFFF9F6FF) : AppColors.ink,
+    );
+
+    final textTheme = ThemeData(
+      brightness: brightness,
+      fontFamily: 'Segoe UI',
+    ).textTheme.apply(
+          bodyColor: dark ? const Color(0xFFF9F6FF) : AppColors.ink,
+          displayColor: dark ? const Color(0xFFF9F6FF) : AppColors.ink,
+        );
 
     return ThemeData(
       useMaterial3: true,
-      colorScheme: scheme,
+      colorScheme: baseScheme,
       scaffoldBackgroundColor:
-          dark ? const Color(0xFF12101A) : const Color(0xFFF7F5FF),
+          dark ? const Color(0xFF120F1A) : const Color(0xFFF6F3FF),
+      textTheme: textTheme.copyWith(
+        headlineLarge: textTheme.headlineLarge?.copyWith(
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.8,
+        ),
+        headlineMedium: textTheme.headlineMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
+        ),
+        titleLarge: textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+        ),
+        titleMedium: textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+        bodyLarge: textTheme.bodyLarge?.copyWith(
+          height: 1.45,
+        ),
+      ),
       cardTheme: CardThemeData(
         elevation: 0,
-        color: dark ? const Color(0xFF1C1928) : Colors.white,
+        color: dark ? const Color(0xFF1D1A2B) : Colors.white,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(24),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(26),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 18),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(18),
           ),
+          elevation: 0,
+          shadowColor: Colors.transparent,
           textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          foregroundColor: baseScheme.primary,
+          side: BorderSide(
+            color: dark
+                ? baseScheme.primary.withValues(alpha: 0.45)
+                : const Color(0xFFD9D2FF),
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
         ),
       ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: dark ? const Color(0xFF221E31) : Colors.white,
+        fillColor: dark ? const Color(0xFF221C30) : Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        hintStyle: TextStyle(
+          color: dark ? Colors.white60 : AppColors.inkSoft,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
@@ -75,22 +168,27 @@ abstract final class AppTheme {
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
         ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(
+            color: AppColors.accent,
+            width: 1.5,
+          ),
+        ),
       ),
-      dividerTheme: const DividerThemeData(thickness: 0.6, space: 1),
+      dividerTheme: const DividerThemeData(thickness: 0.7, space: 1),
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        borderRadius: BorderRadius.circular(8),
+        linearTrackColor: baseScheme.primary.withValues(alpha: 0.12),
+        circularTrackColor: baseScheme.primary.withValues(alpha: 0.12),
       ),
       listTileTheme: ListTileThemeData(
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
       ),
     );
   }
 
-  /// הגרדיאנט לפי מצב התצוגה.
   static LinearGradient hero(BuildContext context) => LinearGradient(
         begin: AlignmentDirectional.topStart,
         end: AlignmentDirectional.bottomEnd,

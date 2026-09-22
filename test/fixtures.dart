@@ -198,8 +198,7 @@ void buildPatchDb(
       ));
     }
     for (final entry in _fixturePrimaryKeys.entries) {
-      final cols =
-          entry.value.map((c) => '"$c" NOT NULL').join(', ');
+      final cols = entry.value.map((c) => '"$c" NOT NULL').join(', ');
       final pk = entry.value.map((c) => '"$c"').join(', ');
       db.execute('CREATE TABLE delete_${entry.key} '
           '($cols, PRIMARY KEY ($pk))');

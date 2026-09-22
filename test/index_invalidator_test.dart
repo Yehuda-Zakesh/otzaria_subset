@@ -73,14 +73,14 @@ void main() {
     });
 
     test('תיקייה עם קבצים לא קשורים', () {
-      expect(inv.looksLikeIndex(makeDir('docs', marker: 'readme.txt')),
-          isFalse);
+      expect(
+          inv.looksLikeIndex(makeDir('docs', marker: 'readme.txt')), isFalse);
     });
 
     for (final marker in OtzariaIndexInvalidator.indexMarkers) {
       test('מזוהה לפי $marker', () {
-        expect(inv.looksLikeIndex(makeDir('idx-$marker', marker: marker)),
-            isTrue);
+        expect(
+            inv.looksLikeIndex(makeDir('idx-$marker', marker: marker)), isTrue);
       });
     }
 

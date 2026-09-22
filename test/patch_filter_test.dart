@@ -58,10 +58,8 @@ void main() {
     }
   }
 
-  Set<Object?> colOf(sqlite3.Database db, String table, String column) => db
-      .select('SELECT "$column" FROM "$table"')
-      .map((r) => r[column])
-      .toSet();
+  Set<Object?> colOf(sqlite3.Database db, String table, String column) =>
+      db.select('SELECT "$column" FROM "$table"').map((r) => r[column]).toSet();
 
   group('סירוב ותקינות הקלט', () {
     test('patch עם מיגרציות נדחה והפלט אינו נשאר מאחור', () {
@@ -245,8 +243,7 @@ void main() {
       }, bookIds: const {1, 2, 5});
       expect(r.kept['upsert_version_line'], 1);
       expect(r.dropped['upsert_version_line'], 1);
-      onOut((db) =>
-          expect(colOf(db, 'upsert_version_line', 'versionId'), {5}));
+      onOut((db) => expect(colOf(db, 'upsert_version_line', 'versionId'), {5}));
     });
   });
 

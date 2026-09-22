@@ -81,8 +81,7 @@ void main() {
       final subset = buildSubset();
       final before = hashOf(subset);
 
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_line VALUES (100, 1, 0, 'עודכן', 6)");
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
       });
@@ -110,8 +109,7 @@ void main() {
       final subset = buildSubset();
       final linesBefore = countRows(subset, 'line');
 
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_line VALUES (103, 1, 3, 'חדשה', 6)");
         db.execute("INSERT INTO upsert_line VALUES (303, 3, 3, 'בחוץ', 6)");
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
@@ -132,8 +130,7 @@ void main() {
 
     test('ספר ותיק שנכנס לבחירה מדווח כממתין להבאה', () {
       final subset = buildSubset();
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_book VALUES (3, 10, 'ספר 3', 3)");
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
       });
@@ -157,8 +154,7 @@ void main() {
     test('hash תואם עובר את בדיקת המצב הקודם', () {
       final subset = buildSubset();
       final recorded = hashOf(subset);
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
       });
 
@@ -181,8 +177,7 @@ void main() {
     test('hash שאינו תואם עוצר את העדכון', () {
       final subset = buildSubset();
       final before = hashOf(subset);
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_line VALUES (100, 1, 0, 'עודכן', 6)");
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
       });
@@ -206,8 +201,7 @@ void main() {
     test('patch עם מיגרציות נדחה והמסד לא משתנה', () {
       final subset = buildSubset();
       final before = hashOf(subset);
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO migrations VALUES (1, 'ALTER TABLE book "
             "ADD COLUMN whatever TEXT')");
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
@@ -232,8 +226,7 @@ void main() {
       final subset = buildSubset();
       final before = hashOf(subset);
       // ה-patch מצהיר על מעבר 7→8 בזמן שהמסד בגרסה 1.
-      buildPatchDb(at('patch.db'), fromVersion: 7, toVersion: 8,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 7, toVersion: 8, mutate: (db) {
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','8')");
       });
 
@@ -283,8 +276,7 @@ void main() {
 
     test('גיבוי .bak אינו נשאר אחרי הצלחה', () {
       final subset = buildSubset();
-      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
-          mutate: (db) {
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
         db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
       });
       const SubsetUpdater().applyPatch(
@@ -322,8 +314,8 @@ void main() {
         ),
       );
 
-      final after = const SubsetUpdater()
-          .profileAfter(profile, result, schemaVersion: 5);
+      final after =
+          const SubsetUpdater().profileAfter(profile, result, schemaVersion: 5);
 
       expect(after.dbVersion, 2);
       expect(after.schemaVersion, 5);

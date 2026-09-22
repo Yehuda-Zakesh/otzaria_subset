@@ -19,6 +19,8 @@ export 'src/engine/index_invalidator.dart'
         OtzariaIndexInvalidator,
         IndexInvalidationResult,
         IndexInvalidationException;
+export 'src/engine/subset_pruner.dart'
+    show SubsetPruner, SubsetPruneResult, SubsetPruneException;
 export 'src/engine/removal_plan.dart' show RemovalSelection, keepSpecFor;
 export 'src/engine/library_catalog.dart'
     show

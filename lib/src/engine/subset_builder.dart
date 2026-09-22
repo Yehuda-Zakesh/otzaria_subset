@@ -60,7 +60,12 @@ class SubsetBuilder {
   /// [targetPath] חייב להיות פנוי; קובץ קיים הוא שגיאה ולא דריסה, כדי
   /// שבנייה לא תמחק ספרייה עובדת של המשתמש.
   ///
-  /// [onStage] מדווח שם שלב, [onTable] מדווח טבלה וכמה שורות הועתקו בה.
+  /// [onStage] מדווח שם שלב, [onTable] מדווח טבלה וכמה שורות הועתקו בה,
+  /// ו-[onTableStart] מדווח על טבלה **לפני** שהעתקתה מתחילה.
+  ///
+  /// ‏[onTableStart] אינו נוחות: טבלה אחת גדולה נמשכת דקות ארוכות, ובלי
+  /// דיווח מוקדם המסך קופא על הטבלה הקודמת — והמשתמש מסיק שהתוכנה תקועה
+  /// ועוצר אותה באמצע.
   /// [keepCategoryIds] — גיזום עץ הקטגוריות. `null` שומר את העץ **במלואו**
   /// (ברירת המחדל, והתנהגות אוצריא המקורית). כשמסופק, `category`
   /// ו-`category_closure` מסוננות אליו — ראו `CategoryKeepSet` להסבר למה
@@ -77,6 +82,8 @@ class SubsetBuilder {
     Set<int>? keepCategoryIds,
     void Function(String stage)? onStage,
     void Function(String table, int rows)? onTable,
+    void Function(String table, int index, int total)? onTableStart,
+    void Function(int done, int total)? onIndex,
   }) {
     if (!File(sourcePath).existsSync()) {
       throw SubsetBuildException('מסד המקור אינו קיים: $sourcePath');
@@ -104,6 +111,10 @@ class SubsetBuilder {
       final schemaVersion = _readMetaInt(db, 'db_schema_version');
 
       onStage?.call('schema');
+      // ‏**חייב להיקבע לפני שנוצרת הטבלה הראשונה** — אחר כך שינוי המצב
+      // דורש `VACUUM` מלא. זה מה שמאפשר להסרה הבאה למחוק שורות במקום
+      // ולשחרר את הדף לדיסק בלי לכתוב את כל המסד מחדש; ראו `SubsetPruner`.
+      db.execute('PRAGMA auto_vacuum = INCREMENTAL');
       db.execute('PRAGMA journal_mode = OFF');
       db.execute('PRAGMA synchronous = OFF');
       db.execute('PRAGMA foreign_keys = OFF');
@@ -129,10 +140,15 @@ class SubsetBuilder {
         db,
         pruneCategories: keepCategoryIds != null,
         onTable: onTable,
+        onTableStart: onTableStart,
       );
 
       onStage?.call('indexes');
-      _runDdl(db, "type IN ('index','view','trigger')");
+      _runDdl(
+        db,
+        "type IN ('index','view','trigger')",
+        onEach: onIndex,
+      );
 
       db.execute('DETACH DATABASE full');
       attached = false;
@@ -174,7 +190,14 @@ class SubsetBuilder {
   }
 
   /// מריץ ביעד את הצהרות ה-DDL של המקור שתואמות את [filter].
-  void _runDdl(sqlite3.Database db, String filter) {
+  ///
+  /// [onEach] מדווח לפני כל הצהרה. בניית אינדקס על מיליוני שורות נמשכת
+  /// דקות, ובלי דיווח כל שלב האינדקסים נראה כמו תקיעה אחת ארוכה.
+  void _runDdl(
+    sqlite3.Database db,
+    String filter, {
+    void Function(int done, int total)? onEach,
+  }) {
     final statements = [
       for (final row in db.select(
         'SELECT sql FROM full.sqlite_master WHERE $filter '
@@ -182,8 +205,9 @@ class SubsetBuilder {
       ))
         row['sql'] as String,
     ];
-    for (final sql in statements) {
-      db.execute(sql);
+    for (var i = 0; i < statements.length; i++) {
+      onEach?.call(i + 1, statements.length);
+      db.execute(statements[i]);
     }
   }
 
@@ -213,12 +237,17 @@ class SubsetBuilder {
     sqlite3.Database db, {
     required bool pruneCategories,
     void Function(String table, int rows)? onTable,
+    void Function(String table, int index, int total)? onTableStart,
   }) {
     final counts = <String, int>{};
+    final total = kTableScopesInFkOrder.length;
+    var index = 0;
     db.execute('BEGIN');
     try {
       for (final scope in kTableScopesInFkOrder) {
+        index++;
         if (!_hasTable(db, 'full', scope.name)) continue;
+        onTableStart?.call(scope.name, index, total);
         final cols = _columns(db, 'full', scope.name);
         if (cols.isEmpty) continue;
         final csv = cols.map((c) => '"$c"').join(',');
@@ -247,6 +276,17 @@ class SubsetBuilder {
   /// ל-[ScopeKind.byParent] התנאי מצביע על **טבלת ההורה שביעד**
   /// (`main.<parent>`), לא על המקור: "ההורה שרד" פירושו שהוא כבר הועתק,
   /// וסדר ה-FK מבטיח שההעתקה שלו קדמה לזו של הצאצא.
+  ///
+  /// ## למה `EXISTS` ולא `IN`
+  ///
+  /// ‏`IN (SELECT id FROM main.line)` גורם ל-SQLite לממש את כל המזהים
+  /// של ההורה בטבלה זמנית — מיליוני שורות — לפני שהוא בודק שורה אחת.
+  /// על טבלאות הקישור זה נראה בדיוק כמו תקיעה: קריאה רצופה מהדיסק,
+  /// מעבד ב-100%, וכלום לא נכתב ליעד במשך דקות ארוכות. `EXISTS` על
+  /// עמודת מפתח הוא חיפוש rowid בודד לכל שורה, בלי מימוש בכלל.
+  ///
+  /// ‏[ScopeKind.byBook] נשאר `IN`: `temp._keep` הוא אלפי שורות בודדות,
+  /// והמימוש שלו זול ואף מועיל.
   String _whereFor(TableScope scope) {
     switch (scope.kind) {
       case ScopeKind.global:
@@ -258,8 +298,8 @@ class SubsetBuilder {
         return 'WHERE $terms';
       case ScopeKind.byParent:
         final terms = scope.parents
-            .map((r) => '"${r.column}" IN '
-                '(SELECT "${r.parentColumn}" FROM main."${r.table}")')
+            .map((r) => 'EXISTS (SELECT 1 FROM main."${r.table}" AS _p '
+                'WHERE _p."${r.parentColumn}" = "${scope.name}"."${r.column}")')
             .join(' AND ');
         return 'WHERE $terms';
     }

@@ -68,6 +68,9 @@ class SubsetProfile {
   bool get hasLibrary => dbVersion != null;
 
   SubsetProfile copyWith({
+    /// מאפס את [subsetHash]. נחוץ אחרי מחיקה במקום: ה-hash הישן כבר אינו
+    /// מתאר את המסד, ואימות מולו היה חוסם כל עדכון עתידי.
+    bool clearSubsetHash = false,
     String? label,
     SubsetSpec? spec,
     int? dbVersion,
@@ -84,7 +87,7 @@ class SubsetProfile {
         spec: spec ?? this.spec,
         dbVersion: dbVersion ?? this.dbVersion,
         schemaVersion: schemaVersion ?? this.schemaVersion,
-        subsetHash: subsetHash ?? this.subsetHash,
+        subsetHash: clearSubsetHash ? null : (subsetHash ?? this.subsetHash),
         dbPath: dbPath ?? this.dbPath,
         lastAppliedAt: lastAppliedAt ?? this.lastAppliedAt,
         severedLinkCount: severedLinkCount ?? this.severedLinkCount,

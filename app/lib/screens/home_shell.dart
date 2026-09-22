@@ -9,7 +9,6 @@ import '../jobs/jobs.dart';
 import '../main.dart';
 import '../services/otzaria_install.dart';
 import '../services/update_flow.dart';
-import '../theme.dart';
 import '../widgets/disclaimer.dart';
 import '../widgets/update_guard.dart';
 import 'book_selection_screen.dart';
@@ -54,7 +53,7 @@ class _HomeShellState extends State<HomeShell> {
 
   AppState get _state => AppScope.of(context);
 
-  /// ההבהרה מוצגת פעם אחת, לפני שהמשתמש נוגע במשהו — ראו .
+  /// ההבהרה מוצגת פעם אחת, לפני שהמשתמש נוגע במשהו — ראו kDisclaimer.
   Future<void> _showDisclaimerIfNeeded() async {
     if (_state.settings.disclaimerAccepted) return;
     if (!await showDisclaimerDialog(context)) return;
@@ -260,15 +259,54 @@ class _HomeShellState extends State<HomeShell> {
         _progress?.stage != FlowStage.done;
 
     return Scaffold(
-      body: Row(
-        children: [
-          _Sidebar(
-            current: _view,
-            enabled: !busy,
-            onSelect: (view) => setState(() => _view = view),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFF7F5FD),
+              Color(0xFFF2F1FB),
+              Color(0xFFF5FAFF),
+            ],
           ),
-          Expanded(child: _body()),
-        ],
+        ),
+        child: Row(
+          children: [
+            _Sidebar(
+              current: _view,
+              enabled: !busy,
+              onSelect: (view) => setState(() => _view = view),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 18, 18, 18),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(30),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFCFBFF),
+                      border: Border.all(
+                        color: const Color(0xFFE7E0FB),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color:
+                              const Color(0xFF2B2147).withValues(alpha: 0.06),
+                          blurRadius: 24,
+                          spreadRadius: 0,
+                          offset: const Offset(0, 12),
+                        ),
+                      ],
+                    ),
+                    child: _body(),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -315,29 +353,90 @@ class _Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 132,
-        decoration: BoxDecoration(gradient: AppTheme.hero(context)),
-        child: SafeArea(
-          child: Column(
-            children: [
-              const SizedBox(height: 28),
-              const Icon(
-                Icons.auto_stories_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-              const SizedBox(height: 28),
-              for (final item in _items)
-                _SidebarItem(
-                  icon: item.icon,
-                  label: item.label,
-                  // מסך ההתקדמות אינו יעד בפני עצמו — הוא מוצג במקום
-                  // "הספרייה", ולכן זה מה שנראה מסומן.
-                  selected: current == item.view ||
-                      (item.view == _View.home && current == _View.progress),
-                  onTap: enabled ? () => onSelect(item.view) : null,
-                ),
+        width: 170,
+        margin: const EdgeInsets.fromLTRB(18, 18, 0, 18),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              const Color(0xFF3E2D78).withValues(alpha: 0.97),
+              const Color(0xFF1F1B36).withValues(alpha: 0.98),
+              const Color(0xFF151826).withValues(alpha: 0.98),
             ],
+          ),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1A1530).withValues(alpha: 0.24),
+              blurRadius: 28,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.auto_stories_rounded,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'ספרייה',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    fontSize: 12,
+                    letterSpacing: 0.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                for (final item in _items)
+                  _SidebarItem(
+                    icon: item.icon,
+                    label: item.label,
+                    // מסך ההתקדמות אינו יעד בפני עצמו — הוא מוצג במקום
+                    // "הספרייה", ולכן זה מה שנראה מסומן.
+                    selected: current == item.view ||
+                        (item.view == _View.home && current == _View.progress),
+                    onTap: enabled ? () => onSelect(item.view) : null,
+                  ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: const Text(
+                    'עדכון מבוקר',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -358,23 +457,23 @@ class _SidebarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Material(
           color: selected
-              ? Colors.white.withValues(alpha: 0.22)
+              ? Colors.white.withValues(alpha: 0.19)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(18),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
               child: Opacity(
                 opacity: onTap == null ? 0.45 : 1,
                 child: Column(
                   children: [
                     Icon(icon, color: Colors.white, size: 24),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 7),
                     Text(
                       label,
                       textAlign: TextAlign.center,

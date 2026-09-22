@@ -104,8 +104,8 @@ void main() {
       expect(loaded.schemaVersion, 5);
       expect(loaded.subsetHash, 'subset:abc123');
       expect(loaded.dbPath, r'D:\otzaria\seforim.db');
-      expect(loaded.lastAppliedAt!.toIso8601String(),
-          applied.toIso8601String());
+      expect(
+          loaded.lastAppliedAt!.toIso8601String(), applied.toIso8601String());
       expect(loaded.severedLinkCount, 1234);
       expect(loaded.hasLibrary, isTrue);
     });
@@ -170,8 +170,8 @@ void main() {
       expect(raw, isA<Map<String, dynamic>>());
       final map = raw as Map<String, dynamic>;
       expect(map['id'], 'readable');
-      expect((map['spec'] as Map<String, dynamic>)['categoryIds'],
-          equals([1, 3]));
+      expect(
+          (map['spec'] as Map<String, dynamic>)['categoryIds'], equals([1, 3]));
     });
   });
 

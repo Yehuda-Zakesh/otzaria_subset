@@ -57,8 +57,8 @@ void main() {
   group('עקביות הסיווג', () {
     test('byBook — עמודות ספר לא ריקות, בלי הורים', () {
       // ‏byBook בלי עמודות היה מסנן לפי שום תנאי, כלומר שומר הכל.
-      for (final scope in kTableScopesInFkOrder
-          .where((s) => s.kind == ScopeKind.byBook)) {
+      for (final scope
+          in kTableScopesInFkOrder.where((s) => s.kind == ScopeKind.byBook)) {
         expect(scope.bookColumns, isNotEmpty, reason: scope.name);
         expect(scope.parents, isEmpty, reason: scope.name);
         expect(scope.bookColumns.toSet(), hasLength(scope.bookColumns.length),
@@ -67,8 +67,8 @@ void main() {
     });
 
     test('byParent — הורים לא ריקים, בלי עמודות ספר', () {
-      for (final scope in kTableScopesInFkOrder
-          .where((s) => s.kind == ScopeKind.byParent)) {
+      for (final scope
+          in kTableScopesInFkOrder.where((s) => s.kind == ScopeKind.byParent)) {
         expect(scope.parents, isNotEmpty, reason: scope.name);
         expect(scope.bookColumns, isEmpty, reason: scope.name);
       }
