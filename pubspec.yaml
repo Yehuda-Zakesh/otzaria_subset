@@ -3,7 +3,7 @@ description: >-
   מנוע ספרייה חלקית לאוצריא: בונה תת-קבוצה של seforim.db לפי בחירת ספרים
   וקטגוריות, מסנן קובצי patch לאותה תת-קבוצה, ומאמת את התוצאה מול hash
   לוגי חלקי משלו.
-version: 0.1.0
+version: 0.1.1
 publish_to: none
 
 environment:
