@@ -225,6 +225,10 @@ class ApplyPatchArgs {
   final bool categoriesPruned;
   final String? expectedHash;
 
+  /// ספרים שכבר ממתינים. ‏patch שנושא להם שורות אינו מכניס אותם — הוא
+  /// נושא רק את מה שהשתנה, וספר חצי-ריק גרוע מספר חסר (§5).
+  final Set<int> pendingBookIds;
+
   const ApplyPatchArgs({
     required this.subsetPath,
     required this.patchPath,
@@ -233,6 +237,7 @@ class ApplyPatchArgs {
     required this.workDir,
     required this.categoriesPruned,
     this.expectedHash,
+    this.pendingBookIds = const {},
   });
 }
 
@@ -247,6 +252,7 @@ void applyPatchEntry(JobRequest<ApplyPatchArgs> req) {
       workDir: req.args.workDir,
       categoriesPruned: req.args.categoriesPruned,
       expectedHash: req.args.expectedHash,
+      pendingBookIds: req.args.pendingBookIds,
       onStage: (stage) => port.send(JobStage(stage)),
     );
     port.send(JobDone(result));

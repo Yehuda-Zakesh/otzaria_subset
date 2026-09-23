@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -82,6 +83,13 @@ class AppSettingsStore {
   final Directory profilesDir;
 
   AppSettingsStore._(this.file, this.profilesDir);
+
+  /// מאגר בתיקייה נתונה — לבדיקות, שאין להן תיקיית תמיכה של אפליקציה.
+  @visibleForTesting
+  factory AppSettingsStore.at(String dir) => AppSettingsStore._(
+        File(p.join(dir, 'settings.json')),
+        Directory(p.join(dir, 'profiles')),
+      );
 
   static Future<AppSettingsStore> open() async {
     final dir = await getApplicationSupportDirectory();

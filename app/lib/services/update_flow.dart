@@ -115,16 +115,21 @@ class SubsetUpdateFlow {
   }
 
   /// גילוי ותכנון. אינו נוגע בספרייה של המשתמש.
-  Future<LibraryUpdatePlan> check() async {
+  ///
+  /// [forceFull]: תוכנית של הורדה מלאה גם כשהספרייה מעודכנת. זה המסלול
+  /// של החזרת ספרים שנמחקו ושל ספרים שממתינים — אלה אינם מגיעים בשום
+  /// עדכון, רק ממסד מלא (§5). גרסה מקומית "לא ידועה" היא בדיוק מה
+  /// שמנתב את המתכנן לשם, בלי דרישה שההורדה תקדם את הגרסה.
+  Future<LibraryUpdatePlan> check({bool forceFull = false}) async {
     final source = _openSource();
     try {
       final local = _localVersion();
       final discovery = await LibraryUpdateDiscovery(client: source).discover(
         allowPrerelease: false,
       );
-      return const LibraryUpdatePlanner().plan(
+      final plan = const LibraryUpdatePlanner().plan(
         localVersion: local.dbVersion,
-        hasLocalVersionMeta: local.hasVersionMeta,
+        hasLocalVersionMeta: local.hasVersionMeta && !forceFull,
         latestVersion: discovery.latestVersion,
         edges: discovery.edges,
         latestFullDbAsset: discovery.latestFullDbAsset,
@@ -134,6 +139,17 @@ class SubsetUpdateFlow {
         blockingSchemaVersion: discovery.blockingSchemaVersion,
         blockingPatchFormatVersion: discovery.blockingPatchFormatVersion,
       );
+      // בכפייה כבתה במתכנן הבדיקה שההורדה מקדמת את הגרסה. מסד מלא ישן מזה
+      // שכבר כאן (ובלי השלמה) היה מחזיר את כל התוכן אחורה בשקט.
+      if (forceFull && forcedFullRegresses(plan, local)) {
+        return LibraryUpdatePlan.blocked(
+          localVersion: local.dbVersion,
+          targetVersion: local.dbVersion,
+          reason: 'forced full download would regress '
+              '${local.dbVersion} -> ${plan.finalTargetVersion}',
+        );
+      }
+      return plan;
     } finally {
       source.dispose();
     }
@@ -231,11 +247,10 @@ class SubsetUpdateFlow {
         case JobFailed(:final message):
           throw FlowException(message);
         case JobDone(:final result):
-          final rebuild = result! as SubsetRebuildResult;
-          current = const SubsetRebuilder().profileAfter(
-            profile.copyWith(spec: spec),
-            rebuild,
-            categoriesPruned: true,
+          current = profileAfterInPlaceRebuild(
+            profile,
+            spec,
+            result! as SubsetRebuildResult,
           );
           onProfile(current);
         case JobBytes(:final done, :final total):
@@ -321,6 +336,7 @@ class SubsetUpdateFlow {
     required void Function(SubsetProfile profile) onProfile,
     required void Function(FlowOutcome outcome) onOutcome,
     bool Function()? isCancelled,
+    void Function(LibraryCatalog catalog)? onFullCatalog,
   }) async* {
     // לפני גזימה ראשונה הכלל ריק, וכלל ריק שומר אפס ספרים: מסלול ה-patch
     // היה מסנן החוצה כל טקסט, ובנייה מחדש הייתה מרוקנת את הספרייה המלאה.
@@ -348,6 +364,7 @@ class SubsetUpdateFlow {
           profile: current,
           spec: spec,
           isCancelled: isCancelled,
+          onFullCatalog: onFullCatalog,
           onProfile: (next) {
             current = next;
             onProfile(next);
@@ -390,7 +407,8 @@ class SubsetUpdateFlow {
 
     onOutcome(FlowOutcome(
       profile: current,
-      pendingAcquisition: pending,
+      // מהפרופיל ולא מהריצה: ספר שהמתין מעדכון קודם עדיין חסר.
+      pendingAcquisition: current.pendingBookIds,
       rebuilt: rebuilt,
     ));
     yield const FlowProgress(FlowStage.done, 'הסתיים.');
@@ -445,6 +463,7 @@ class SubsetUpdateFlow {
               workDir: workDir,
               categoriesPruned: current.categoriesPruned,
               expectedHash: current.subsetHash,
+              pendingBookIds: current.pendingBookIds,
             ),
           )) {
             switch (event) {
@@ -489,6 +508,7 @@ class SubsetUpdateFlow {
     required SubsetSpec spec,
     required void Function(SubsetProfile) onProfile,
     bool Function()? isCancelled,
+    void Function(LibraryCatalog catalog)? onFullCatalog,
   }) async* {
     final asset = plan.fullDbAsset;
     if (asset == null) {
@@ -509,27 +529,41 @@ class SubsetUpdateFlow {
       );
     }
 
-    yield const FlowProgress(FlowStage.extracting, 'מחלץ ספרייה מלאה…');
+    yield const FlowProgress(FlowStage.downloading, 'מוריד את הספרייה המלאה…');
     try {
-      if (PatchDownloader.isRemoteUrl(asset.downloadUrl)) {
-        // מהרשת ישר למחלץ — הארכיון הדחוס אינו נוחת על הדיסק.
-        final client = http.Client();
+      if (asset.isSplit || PatchDownloader.isRemoteUrl(asset.downloadUrl)) {
+        // מהרשת ישר למחלץ — הארכיון הדחוס אינו נוחת על הדיסק. ההורדה רצה
+        // לצד הזרם, כדי שההתקדמות שלה תגיע למסך: ‏1.5GB בלי פס שזז נראים
+        // כמו תקיעה.
+        final progress = StreamController<FlowProgress>();
+        final total = asset.size;
+        var lastPercent = -1;
+        final download = decompressStreamToFile(
+          _fullDbBytes(asset, isCancelled: isCancelled),
+          fullPath,
+          isCancelled: isCancelled,
+          onProgress: (done) {
+            if (total <= 0) return;
+            final percent = (done * 100 ~/ total).clamp(0, 100);
+            if (percent == lastPercent) return;
+            lastPercent = percent;
+            progress.add(FlowProgress(
+              FlowStage.downloading,
+              'מוריד את הספרייה המלאה — $percent%',
+              fraction: percent / 100,
+            ));
+          },
+        ).whenComplete(progress.close);
+        // שגיאה בהורדה נזרקת מ-`await download` למטה, לא מהזרם.
+        unawaited(download.catchError((Object _) {}));
         try {
-          final request = http.Request('GET', Uri.parse(asset.downloadUrl));
-          final response = await client.send(request);
-          if (response.statusCode != 200) {
-            throw FlowException('ההורדה נכשלה (קוד ${response.statusCode}).');
-          }
-          await decompressStreamToFile(
-            // חיבור שנתקע אינו מסתיים לעולם, ובלי מנה חדשה גם הביטול אינו
-            // נבדק — המסך היה נתקע בלי דרך החוצה.
-            response.stream.timeout(const Duration(minutes: 2)),
-            fullPath,
-            isCancelled: isCancelled,
-          );
+          yield* progress.stream;
         } finally {
-          client.close();
+          // ביטול עוצר את הזרם מיד, אבל המחלץ עוד כותב עד המנה הבאה —
+          // מחיקת הקובץ לפני שהוא נסגר הייתה נכשלת ומשאירה גיגה-בייטים.
+          await download.catchError((Object _) {});
         }
+        await download;
       } else {
         // המראה כבר על הדיסק — מפרקים ממנה ישירות, בלי העתק ביניים.
         final streamed = await ZstdFileStream.decompressFileToFile(
@@ -539,6 +573,15 @@ class SubsetUpdateFlow {
         );
         if (!streamed) {
           throw const FlowException('פתיחת קובץ הספרייה אינה זמינה במחשב זה.');
+        }
+      }
+
+      // הקטלוג המלא נקרא כאן, כל עוד המסד המלא קיים: זו ההזדמנות היחידה
+      // לדעת מה אפשר להחזיר אחר כך. כשל כאן אינו עוצר את הבנייה.
+      if (onFullCatalog != null) {
+        yield const FlowProgress(FlowStage.rebuilding, 'קורא את רשימת הספרים…');
+        await for (final event in runJob(catalogEntry, fullPath)) {
+          if (event is JobDone) onFullCatalog(event.result! as LibraryCatalog);
         }
       }
 
@@ -566,8 +609,9 @@ class SubsetUpdateFlow {
             throw FlowException(message);
           case JobDone(:final result):
             final rebuild = result! as SubsetRebuildResult;
+            // הכלל מהקריאה ולא מהפרופיל: בהחזרת ספרים הוא רחב מזה שנשמר.
             onProfile(const SubsetRebuilder().profileAfter(
-              profile,
+              profile.copyWith(spec: spec),
               rebuild,
               categoriesPruned: true,
             ));
@@ -579,6 +623,38 @@ class SubsetUpdateFlow {
       }
     } finally {
       _deleteQuietly(fullPath);
+    }
+  }
+
+  /// הבתים הדחוסים של המסד המלא, גם כשהוא מתפרסם בחלקים.
+  ///
+  /// נכס מפוצל הוא וירטואלי — אין לו כתובת משלו — והחלקים הם פשוט
+  /// המשך של אותו זרם zstd, ולכן מספיק לשרשר אותם לפי הסדר.
+  static Stream<List<int>> _fullDbBytes(
+    ReleaseAsset asset, {
+    bool Function()? isCancelled,
+  }) async* {
+    final urls = asset.isSplit
+        ? [for (final part in asset.parts) part.downloadUrl]
+        : [asset.downloadUrl];
+    final client = http.Client();
+    try {
+      for (final url in urls) {
+        // בין חלק לחלק אין מנה שהמחלץ יבדוק בה ביטול — בודקים כאן.
+        if (isCancelled?.call() ?? false) return;
+        // חלק שהשרת אינו עונה עליו היה נועל את המסך בלי דרך החוצה.
+        final response = await client
+            .send(http.Request('GET', Uri.parse(url)))
+            .timeout(const Duration(minutes: 2));
+        if (response.statusCode != 200) {
+          throw FlowException('ההורדה נכשלה (קוד ${response.statusCode}).');
+        }
+        // חיבור שנתקע אינו מסתיים לעולם, ובלי מנה חדשה גם הביטול אינו
+        // נבדק — המסך היה נתקע בלי דרך החוצה.
+        yield* response.stream.timeout(const Duration(minutes: 2));
+      }
+    } finally {
+      client.close();
     }
   }
 
@@ -607,7 +683,37 @@ class SubsetUpdateFlow {
   }
 }
 
-/// שמות השלבים של המנוע בעברית, לתצוגה.
+/// האם הורדה מלאה בכפייה ([SubsetUpdateFlow.check] עם `forceFull`) הייתה
+/// מחזירה את הספרייה לגרסה ישנה מזו שכבר כאן.
+///
+/// בכפייה כבתה במתכנן הבדיקה שההורדה מקדמת את הגרסה, ולכן היא כאן. גרסת
+/// היעד היא זו שבסוף ההשלמה ב-patches; יעד לא ידוע נחשב ישן — אי אפשר
+/// להבטיח שהוא לא מחזיר אחורה. גרסה מקומית לא ידועה אינה חוסמת.
+bool forcedFullRegresses(LibraryUpdatePlan plan, LocalDbVersion local) =>
+    local.hasVersionMeta &&
+    plan.kind == LibraryUpdatePlanKind.fullDownload &&
+    (plan.finalTargetVersion ?? 0) < local.dbVersion;
+
+/// הפרופיל אחרי גזימה בבנייה מחדש, כשהמקור הוא הספרייה עצמה.
+///
+/// ‏`SubsetRebuilder.profileAfter` מאפס את הממתינים — נכון כשהמקור מסד
+/// מלא. כאן ממתין שלא נבנה (אינו במקור) לא הגיע, ואיפוסו היה מעלים אותו;
+/// ממתין שכן נבנה (המקור היה המסד המלא של אוצריא) כבר אינו ממתין.
+SubsetProfile profileAfterInPlaceRebuild(
+  SubsetProfile profile,
+  SubsetSpec spec,
+  SubsetRebuildResult rebuild,
+) =>
+    const SubsetRebuilder()
+        .profileAfter(
+          profile.copyWith(spec: spec),
+          rebuild,
+          categoriesPruned: true,
+        )
+        .copyWith(
+          pendingBookIds: profile.pendingBookIds.difference(rebuild.bookIds),
+        );
+
 /// שלבי מנוע שמהם ואילך ביטול אינו בטוח: מחיקה במקום (בתוך transaction
 /// פתוחה), החלפת הקובץ וביטול האינדקס שאחריה.
 bool isPointOfNoReturn(String stage) => const {
@@ -618,6 +724,7 @@ bool isPointOfNoReturn(String stage) => const {
       'cleanup',
     }.contains(stage);
 
+/// שמות השלבים של המנוע בעברית, לתצוגה — בלי מונחי מסד (§13).
 String stageLabel(String stage) => switch (stage) {
       'verifyLocal' => 'מאמת את הספרייה הקיימת',
       'filter' => 'מסנן את העדכון לבחירה',
@@ -625,12 +732,12 @@ String stageLabel(String stage) => switch (stage) {
       'hash' => 'מסכם',
       'verify' => 'מאמת',
       'swap' => 'מחליף',
-      'resolve' => 'פותר את הבחירה',
+      'resolve' => 'מחשב את הבחירה',
       'preflight' => 'בדיקה מקדימה',
-      'schema' => 'בונה סכמה',
-      'copy' => 'מעתיק שורות',
-      'index' => 'בונה אינדקסים',
-      'indexes' => 'בונה אינדקסים',
+      'schema' => 'מכין את מבנה הספרייה',
+      'copy' => 'מעתיק את הספרים',
+      'index' => 'מסדר את הספרייה',
+      'indexes' => 'מסדר את הספרייה',
       'analyze' => 'מנתח',
       'invalidateIndex' => 'מבטל את אינדקס החיפוש',
       'delete' => 'מוחק ספרים',
@@ -657,7 +764,9 @@ Future<Uint8List?> decompressOneShot(Uint8List compressed) async {
 /// ההבדל בין "עובד" ל"תקוע" בעיני המשתמש, וזו הטעות שכבר קרתה כאן.
 FlowProgress _tableProgress(int done, int? total) => FlowProgress(
       FlowStage.rebuilding,
-      total == null ? 'מעתיק טבלה $done' : 'מעתיק טבלה $done מתוך $total',
+      total == null
+          ? 'מעתיק את הספרים — שלב $done'
+          : 'מעתיק את הספרים — שלב $done מתוך $total',
       fraction: total == null || total == 0 ? null : done / total,
     );
 
@@ -667,6 +776,6 @@ FlowProgress _tableProgress(int done, int? total) => FlowProgress(
 /// עליהן — בלי המונה הזה הוא נראה כמו תקיעה אחת ארוכה.
 FlowProgress _indexProgress(int done, int total) => FlowProgress(
       FlowStage.rebuilding,
-      'בונה אינדקס $done מתוך $total',
+      'מסדר את הספרייה — שלב $done מתוך $total',
       fraction: total == 0 ? null : done / total,
     );

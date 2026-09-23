@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria_subset/otzaria_subset.dart';
 
@@ -27,7 +29,15 @@ import '../widgets/format.dart';
 class BookSelectionScreen extends StatefulWidget {
   final void Function(SubsetSpec spec, int? estimatedBytes) onApply;
 
-  const BookSelectionScreen({super.key, required this.onApply});
+  /// בחירה שנטענה מקובץ. ההחלטה אם זו גזימה או בנייה ממסד מלא אינה
+  /// של המסך הזה — ראו `_applyImported` ב-`HomeShell`.
+  final void Function(SubsetSpec spec) onImport;
+
+  const BookSelectionScreen({
+    super.key,
+    required this.onApply,
+    required this.onImport,
+  });
 
   @override
   State<BookSelectionScreen> createState() => _BookSelectionScreenState();
@@ -146,6 +156,58 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
     });
   }
 
+  static const _selectionFiles = XTypeGroup(
+    label: 'בחירת ספרים',
+    extensions: ['json'],
+  );
+
+  /// שומר את הבחירה לקובץ, להעברה למחשב אחר. נשמר הכלל ולא רשימת
+  /// ספרים — כדי שקטגוריה שנשמרה תמשיך לקבל ספרים חדשים גם שם (§14).
+  Future<void> _export(SubsetSpec spec) async {
+    final state = AppScope.of(context);
+    final location = await getSaveLocation(
+      suggestedName: 'בחירת-ספרים.json',
+      acceptedTypeGroups: const [_selectionFiles],
+    );
+    if (location == null || !mounted) return;
+    try {
+      await File(location.path).writeAsString(
+        SelectionExport(
+          spec: spec,
+          label: state.profile?.label,
+          dbVersion: state.stats?.dbVersion,
+          exportedAt: DateTime.now(),
+        ).encode(),
+        flush: true,
+      );
+      _snack('הבחירה נשמרה.');
+    } catch (e) {
+      ErrorLog.instance.record('שמירת הבחירה נכשלה: $e');
+      _snack('לא הצלחנו לשמור את הקובץ.');
+    }
+  }
+
+  Future<void> _import() async {
+    final file = await openFile(acceptedTypeGroups: const [_selectionFiles]);
+    if (file == null || !mounted) return;
+    SelectionExport imported;
+    try {
+      imported = SelectionExport.decode(await file.readAsString());
+    } catch (e) {
+      // קובץ זר או פגום — הפירוט הטכני ליומן בלבד.
+      ErrorLog.instance.record('ייבוא בחירה נכשל: $e');
+      _snack('הקובץ אינו קובץ בחירת ספרים של התוכנה.');
+      return;
+    }
+    if (!mounted) return;
+    widget.onImport(imported.spec);
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
   /// כמה ספרים סומנו למחיקה, לפי העץ שבזיכרון.
   int _removedCount(LibraryCatalog catalog) {
     final removed = <int>{};
@@ -193,8 +255,31 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
 
     final spec = _spec();
     final removedBooks = _removedCount(catalog);
+    // ייצוא: הבחירה שעל המסך אם סומן משהו, אחרת זו שכבר הוחלה.
+    final exportable =
+        _removal.isEmpty ? (state.hasSubset ? state.spec : null) : spec;
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+          child: Row(
+            children: [
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => unawaited(_import()),
+                icon: const Icon(Icons.file_open_rounded),
+                label: const Text('ייבוא בחירה'),
+              ),
+              TextButton.icon(
+                onPressed: exportable == null || exportable.isEmpty
+                    ? null
+                    : () => unawaited(_export(exportable)),
+                icon: const Icon(Icons.save_alt_rounded),
+                label: const Text('שמירת הבחירה לקובץ'),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: CategoryTree(
             catalog: catalog,

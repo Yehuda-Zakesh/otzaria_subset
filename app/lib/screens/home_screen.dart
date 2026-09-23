@@ -24,7 +24,11 @@ class HomeScreen extends StatelessWidget {
   final AppRelease? appUpdate;
   final VoidCallback onInstallAppUpdate;
 
+  /// הבאת הספרים שממתינים — בנייה ממסד מלא עם הבחירה הנוכחית.
+  final VoidCallback onFetchPending;
+
   const HomeScreen({
+    required this.onFetchPending,
     super.key,
     required this.onChooseBooks,
     required this.onCheckUpdates,
@@ -86,7 +90,10 @@ class HomeScreen extends StatelessWidget {
                 ],
                 if (state.pendingAcquisition.isNotEmpty) ...[
                   const SizedBox(height: 24),
-                  _PendingCard(count: state.pendingAcquisition.length),
+                  _PendingCard(
+                    count: state.pendingAcquisition.length,
+                    onFetch: onFetchPending,
+                  ),
                 ],
                 const SizedBox(height: 24),
                 UpdateGuardBanner(
@@ -278,8 +285,9 @@ class _Empty extends StatelessWidget {
 /// לבנות שוב, לא מה זה patch ומה הוא נושא.
 class _PendingCard extends StatelessWidget {
   final int count;
+  final VoidCallback onFetch;
 
-  const _PendingCard({required this.count});
+  const _PendingCard({required this.count, required this.onFetch});
 
   @override
   Widget build(BuildContext context) => Card(
@@ -294,12 +302,20 @@ class _PendingCard extends StatelessWidget {
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
+                  // עדכון רגיל לא יביא אותם לעולם (§5) — ולכן הכפתור, ולא
+                  // הבטחה ל"פעם הבאה" שכמעט אינה מגיעה.
                   count == 1
-                      ? 'ספר אחד שביקשת עדיין אינו כאן. הוא יגיע בפעם הבאה '
-                          'שהספרייה תיבנה מחדש.'
+                      ? 'ספר אחד שביקשת עדיין אינו כאן. כדי להביא אותו צריך '
+                          'להוריד את הספרייה המלאה פעם אחת.'
                       : '${formatCount(count)} ספרים שביקשת עדיין אינם כאן. '
-                          'הם יגיעו בפעם הבאה שהספרייה תיבנה מחדש.',
+                          'כדי להביא אותם צריך להוריד את הספרייה המלאה פעם '
+                          'אחת.',
                 ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: onFetch,
+                child: const Text('להביא עכשיו'),
               ),
             ],
           ),

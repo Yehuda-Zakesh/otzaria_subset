@@ -1,16 +1,16 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:otzaria_subset/otzaria_subset.dart';
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 
-import '../jobs/jobs.dart';
 import '../main.dart';
-import '../services/app_updater.dart';
 import '../services/error_report.dart';
+import '../services/mirror_builder.dart';
 import '../services/otzaria_install.dart';
 import '../services/update_flow.dart';
+import '../state/app_settings.dart';
+import '../state/flow_controller.dart';
 import '../theme.dart';
 import '../widgets/app_update.dart';
 import '../widgets/disclaimer.dart';
@@ -19,11 +19,15 @@ import '../widgets/update_guard.dart';
 import 'book_selection_screen.dart';
 import 'home_screen.dart';
 import 'progress_screen.dart';
+import 'restore_screen.dart';
 import 'settings_screen.dart';
 
-enum _View { home, books, progress, settings }
+enum _View { home, books, restore, progress, settings }
 
-/// המעטפת: ניווט, והפעלת הפעולות הארוכות.
+/// המעטפת: ניווט, והדיאלוגים שלפני כל פעולה ארוכה.
+///
+/// הפעולה עצמה — המנעולים, הביטול, ההתקדמות — יושבת ב-[FlowController].
+/// כאן נשאר רק מה שצריך `BuildContext`.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -33,42 +37,27 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   var _view = _View.home;
-  var _cancelled = false;
-  var _checking = false;
-  String? _updateNotice;
-  AppRelease? _appUpdate;
-  String? _progressTitle;
-  FlowProgress? _progress;
-  String? _flowError;
-  StreamSubscription<FlowProgress>? _flow;
-
-  /// פעולה על הספרייה בתהליך — מהלחיצה הראשונה (עוד לפני הדיאלוגים)
-  /// ועד שהזרם נסגר באמת. בלי זה לחיצה כפולה, או בדיקת עדכונים ברקע
-  /// בזמן גזימה, היו מריצות שתי פעולות על אותו קובץ.
-  var _launching = false;
-  var _flowActive = false;
-
-  /// נדבק עד סוף הזרימה: אחרי נקודת האל-חזור אין ביטול — ראו
-  /// `FlowProgress.committing`.
-  var _committing = false;
+  FlowController? _controllerOrNull;
 
   /// הספרייה שהמצב הנוכחי (ספירות, קטלוג) נקרא ממנה.
   String? _libraryPath;
   var _libraryPathKnown = false;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_showDisclaimerIfNeeded());
-      unawaited(_loadStats());
-      unawaited(_checkAppUpdate());
-    });
-  }
+  FlowController get _flow => _controllerOrNull!;
+  AppState get _state => AppScope.of(context);
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_controllerOrNull == null) {
+      // נוצר כאן ולא ב-initState: הוא צריך את AppState מה-AppScope.
+      _controllerOrNull = FlowController(_state)..addListener(_onFlow);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_showDisclaimerIfNeeded());
+        unawaited(_flow.loadStats());
+        unawaited(_flow.checkAppUpdate());
+      });
+    }
     // החלפת ספרייה בהגדרות: הקטלוג והספירות של הקודמת אסור שיישארו —
     // בחירה על קטלוג ישן הייתה נגזמת לפי מזהים של ספרייה אחרת.
     final path = _state.paths.libraryDbPath;
@@ -84,19 +73,21 @@ class _HomeShellState extends State<HomeShell> {
       _state
         ..setCatalog(null)
         ..setStats(null);
-      unawaited(_loadStats());
+      unawaited(_flow.loadStats());
     });
+  }
+
+  void _onFlow() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    unawaited(_flow?.cancel());
+    _controllerOrNull
+      ?..removeListener(_onFlow)
+      ..dispose();
     super.dispose();
   }
-
-  AppState get _state => AppScope.of(context);
-
-  bool get _busy => _launching || _flowActive;
 
   /// ההבהרה מוצגת פעם אחת, לפני שהמשתמש נוגע במשהו — ראו kDisclaimer.
   Future<void> _showDisclaimerIfNeeded() async {
@@ -108,50 +99,17 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  SubsetUpdateFlow? _buildFlow() {
-    final db = _state.paths.libraryDbPath;
-    final work = _state.paths.workDir;
-    if (db == null || work == null) return null;
-    return SubsetUpdateFlow(
-      subsetPath: db,
-      workDir: work,
-      indexDir: _state.paths.indexDir,
-      updateSource: _state.settings.updateSource,
-      updateFolder: _state.settings.updateFolder,
-    );
-  }
-
-  Future<void> _loadStats() async {
-    final state = _state;
-    final path = state.paths.libraryDbPath;
-    if (path == null || !File(path).existsSync()) return;
-    await for (final event in runJob(statsEntry, path)) {
-      // ספירה של ספרייה שכבר הוחלפה בינתיים אינה נכונה לאף מסך.
-      if (event is JobDone && state.paths.libraryDbPath == path) {
-        state.setStats(event.result! as LibraryStats);
-      }
-    }
-  }
-
   // ── עדכון התוכנה עצמה ────────────────────────────────────────────
-
-  /// בדיקה אחת בעלייה, ברקע. כשל מוחזר כ-`null` ונשאר שקט — מי שבא
-  /// לגזום ספרים לא אמור לראות הודעת שגיאה על משהו שלא ביקש.
-  Future<void> _checkAppUpdate() async {
-    final release = await const AppUpdater().check();
-    if (!mounted || release == null) return;
-    setState(() => _appUpdate = release);
-  }
 
   /// ההורדה מחליפה את התוכנה שרצה כרגע ומפעילה אותה מחדש, ולכן היא
   /// זמינה רק מהמסך הראשי — לא באמצע גזימה או עדכון של הספרייה.
   Future<void> _installAppUpdate() async {
-    final release = _appUpdate;
+    final release = _flow.appUpdate;
     // עדכון התוכנה סוגר אותה — אסור באמצע פעולה על הספרייה.
-    if (release == null || _busy) return;
+    if (release == null || _flow.busy) return;
     if (!await showAppUpdateDialog(context, release)) return;
     if (!mounted) return;
-    setState(() => _appUpdate = null);
+    _flow.clearAppUpdate();
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -173,96 +131,199 @@ class _HomeShellState extends State<HomeShell> {
   // ── בדיקת עדכונים ────────────────────────────────────────────────
 
   Future<void> _checkUpdates() async {
-    // לפני המחיקה הראשונה הספרייה עדיין של אוצריא, והזרימה מסרבת לעדכן
-    // אותה — "יש עדכון" כאן היה מבטיח משהו שלא יקרה.
-    if (_checking || _busy || !_state.hasSubset) return;
-    final flow = _buildFlow();
-    if (flow == null) return;
-    setState(() => _checking = true);
-    try {
-      final plan = await flow.check();
-      if (!mounted) return;
-      switch (plan.kind) {
-        case LibraryUpdatePlanKind.none:
-          setState(() => _updateNotice = null);
-        case LibraryUpdatePlanKind.blocked:
-          // הסיבה מהמתכנן מדברת על סכמות ועל DB — ליומן, לא למסך.
-          ErrorLog.instance.record('העדכון חסום: ${plan.reason}');
-          setState(() => _updateNotice = 'העדכון אינו זמין כרגע');
-        case LibraryUpdatePlanKind.delta:
-        case LibraryUpdatePlanKind.fullDownload:
-          setState(() => _updateNotice = 'יש עדכון זמין');
-          await _runUpdate(flow, plan);
-      }
-    } catch (e) {
-      ErrorLog.instance.record('בדיקת העדכונים נכשלה: $e');
-      if (mounted) {
-        setState(
-          () => _updateNotice =
-              userFacingError(e, fallback: 'בדיקת העדכונים נכשלה'),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _checking = false);
-    }
+    final plan = await _flow.checkUpdates();
+    if (plan == null || !mounted) return;
+    await _runUpdate(plan);
   }
 
-  Future<void> _runUpdate(SubsetUpdateFlow flow, LibraryUpdatePlan plan) async {
+  Future<void> _runUpdate(LibraryUpdatePlan plan) async {
+    final flow = _flow.buildFlow();
     final profile = _state.profile;
-    if (profile == null || _busy) return;
-    _launching = true;
-    try {
-      if (!await _confirmOtzariaClosed()) return;
-      if (!await _confirmGuard()) return;
-      if (!mounted) return;
-    } finally {
-      _launching = false;
-    }
-    _startFlow(
+    if (flow == null || profile == null) return;
+    final go = await _flow.guardLaunch(() async {
+      if (!await _confirmOtzariaClosed()) return false;
+      if (!await _confirmGuard()) return false;
+      return mounted;
+    });
+    if (!go || !mounted) return;
+    _start(
       'מעדכן את הספרייה',
       clearsUpdateNotice: true,
+      onSuccess: _refreshDriveStatus(),
       flow.run(
         plan: plan,
         profile: profile,
         spec: _state.spec,
-        isCancelled: () => _cancelled,
+        isCancelled: () => _flow.cancelled,
         onProfile: _state.saveProfile,
-        onOutcome: (outcome) {
-          _state.saveProfile(outcome.profile);
-          _state.setPendingAcquisition(outcome.pendingAcquisition);
-        },
+        onOutcome: (outcome) => _state.saveProfile(outcome.profile),
+        onFullCatalog: _state.saveCatalogSnapshot,
       ),
     );
+  }
+
+  /// מחשב שהתעדכן מכונן מרענן עליו את המצב שלו — אחרת המחשב המחובר היה
+  /// מוריד בפעם הבאה שוב את מה שכבר הוחל כאן. `null` כשאין כונן.
+  Future<void> Function()? _refreshDriveStatus() {
+    final folder = _state.settings.updateSource == UpdateSource.folder
+        ? _state.settings.updateFolder
+        : null;
+    if (folder == null || folder.isEmpty) return null;
+    final db = _state.paths.libraryDbPath;
+    return () => OfflineComputerStatus.capture(db).writeTo(folder);
   }
 
   // ── גזימה ────────────────────────────────────────────────────────
 
   Future<void> _applySelection(SubsetSpec spec, int? estimatedBytes) async {
-    final flow = _buildFlow();
+    final flow = _flow.buildFlow();
     final profile = _state.profile;
-    if (flow == null || profile == null || _busy) return;
-    _launching = true;
-    try {
-      if (!await _confirmOtzariaClosed()) return;
-      if (!await _confirmGuard()) return;
-      if (!mounted || !await _confirmPrune(spec)) return;
-      if (!mounted) return;
-    } finally {
-      _launching = false;
+    if (flow == null || profile == null) return;
+    final go = await _flow.guardLaunch(() async {
+      if (!await _confirmOtzariaClosed()) return false;
+      if (!await _confirmGuard()) return false;
+      if (!mounted || !await _confirmPrune(spec)) return false;
+      return mounted;
+    });
+    if (!go || !mounted) return;
+    // לפני הגזימה הראשונה הקטלוג שבמסך הוא של הספרייה המלאה — ההזדמנות
+    // היחידה לשמור אותו, כדי שאפשר יהיה להחזיר אחר כך את מה שנמחק.
+    final catalog = _state.catalog;
+    if (!profile.categoriesPruned && catalog != null) {
+      _state.saveCatalogSnapshot(catalog);
     }
     _state.setCatalog(null);
-    _startFlow(
+    _start(
       'מעדכן את הספרייה',
       flow.prune(
         profile: profile,
         spec: spec,
         estimatedBytes: estimatedBytes,
-        isCancelled: () => _cancelled,
+        isCancelled: () => _flow.cancelled,
         onProfile: _state.saveProfile,
         onOutcome: (outcome) => _state.saveProfile(outcome.profile),
       ),
     );
   }
+
+  // ── בנייה ממסד מלא: החזרה, ספרים ממתינים, בחירה מיובאת ─────────────
+
+  /// מוריד את הספרייה המלאה ובונה ממנה לפי [spec].
+  ///
+  /// זה המסלול היחיד שמביא ספר שאינו על הדיסק — עדכון נושא רק את מה
+  /// שהשתנה (§5). התוכנית נבדקת **לפני** הדיאלוגים, כדי שהמשתמש יראה
+  /// כמה יורד לפני שהוא מאשר.
+  Future<void> _rebuildFromFull(SubsetSpec spec,
+      {required String title}) async {
+    final flow = _flow.buildFlow();
+    final profile = _state.profile;
+    if (flow == null || profile == null || _flow.busy) return;
+    LibraryUpdatePlan plan;
+    try {
+      plan = await flow.check(forceFull: true);
+    } catch (e) {
+      ErrorLog.instance.record('בדיקת ההורדה המלאה נכשלה: $e');
+      if (mounted) {
+        await _info(
+          'לא הצלחנו להתחבר',
+          userFacingError(e, fallback: 'אפשר לנסות שוב מאוחר יותר.'),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    final asset = plan.fullDbAsset;
+    if (plan.kind != LibraryUpdatePlanKind.fullDownload || asset == null) {
+      ErrorLog.instance.record('הורדה מלאה אינה זמינה: ${plan.reason}');
+      await _info(
+        'הספרייה המלאה אינה זמינה כרגע',
+        'אפשר לנסות שוב מאוחר יותר.',
+      );
+      return;
+    }
+    final go = await _flow.guardLaunch(() async {
+      if (!await _confirmOtzariaClosed()) return false;
+      if (!await _confirmGuard()) return false;
+      if (!mounted || !await _confirmFullDownload(asset.size)) return false;
+      return mounted;
+    });
+    if (!go || !mounted) return;
+    _state.setCatalog(null);
+    _start(
+      title,
+      onSuccess: _refreshDriveStatus(),
+      flow.run(
+        plan: plan,
+        profile: profile,
+        spec: spec,
+        isCancelled: () => _flow.cancelled,
+        onProfile: _state.saveProfile,
+        onOutcome: (outcome) => _state.saveProfile(outcome.profile),
+        onFullCatalog: _state.saveCatalogSnapshot,
+      ),
+    );
+  }
+
+  Future<bool> _confirmFullDownload(int bytes) async {
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('להוריד את הספרייה המלאה?'),
+        content: SizedBox(
+          width: 460,
+          child: Text(
+            'כדי להביא ספרים שאינם במחשב צריך להוריד את הספרייה המלאה פעם '
+            'אחת${bytes > 0 ? ' (בערך ${formatBytes(bytes)})' : ''}. בזמן '
+            'הבנייה נדרש מקום פנוי זמני גדול, והוא מתפנה בסוף. הספרים '
+            'שבחרת למחוק יישארו מחוקים.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('חזרה'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('להוריד'),
+          ),
+        ],
+      ),
+    );
+    return answer ?? false;
+  }
+
+  /// בחירה שיובאה ממחשב אחר.
+  ///
+  /// כשהיא רק מצמצמת (כל מה שהיא שומרת כבר כאן) — גזימה רגילה, בלי
+  /// הורדה. כשהיא מרחיבה, או שאי אפשר לדעת — בנייה ממסד מלא.
+  Future<void> _applyImported(SubsetSpec spec) async {
+    final narrowsOnly = importNarrowsOnly(
+      hasSubset: _state.hasSubset,
+      snapshot: _state.catalogSnapshot,
+      current: _state.spec,
+      imported: spec,
+    );
+    if (narrowsOnly) {
+      await _applySelection(spec, null);
+    } else {
+      await _rebuildFromFull(spec, title: 'מחיל את הבחירה');
+    }
+  }
+
+  Future<void> _info(String title, String text) => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('הבנתי'),
+            ),
+          ],
+        ),
+      );
 
   /// אישור לפני פעולה בלתי הפיכה.
   ///
@@ -277,8 +338,9 @@ class _HomeShellState extends State<HomeShell> {
         content: const SizedBox(
           width: 460,
           child: Text(
-            'הספרים שסימנת יימחקו מהמחשב. כדי להחזיר אותם צריך להוריד '
-            'את הספרייה מחדש.\n\n$kDisclaimer',
+            'הספרים שסימנת יימחקו מהמחשב. אפשר להחזיר אותם אחר כך במסך '
+            '"החזרת ספרים", אבל ההחזרה מורידה את הספרייה המלאה.\n\n'
+            '$kDisclaimer',
           ),
         ),
         actions: [
@@ -336,81 +398,31 @@ class _HomeShellState extends State<HomeShell> {
 
   // ── הרצה ─────────────────────────────────────────────────────────
 
-  void _startFlow(
+  void _start(
     String title,
     Stream<FlowProgress> stream, {
     bool clearsUpdateNotice = false,
+    Future<void> Function()? onSuccess,
   }) {
-    setState(() {
-      _view = _View.progress;
-      _progressTitle = title;
-      _progress = null;
-      _flowError = null;
-      _cancelled = false;
-      _committing = false;
-      _flowActive = true;
-    });
-    var failed = false;
-    _flow = stream.listen(
-      (event) {
-        if (event.committing) _committing = true;
-        if (mounted) setState(() => _progress = event);
-      },
-      onError: (Object error) {
-        failed = true;
-        ErrorLog.instance.record('הפעולה נכשלה: $error');
-        if (!mounted) return;
-        // החריגה הגולמית (שמות טבלאות, patch, סוגי חריגות) נשארת ביומן.
-        setState(
-          () => _flowError = userFacingError(
-            error,
-            fallback: 'הפעולה לא הושלמה. אפשר לנסות שוב, ואם זה חוזר — '
-                'לשלוח דיווח תקלה ממסך ההגדרות.',
-          ),
-        );
-      },
-      onDone: () {
-        _flow = null;
-        if (!mounted) return;
-        setState(() {
-          _flowActive = false;
-          // העדכון הוחל — "יש עדכון זמין" כבר אינו נכון.
-          if (clearsUpdateNotice && !failed) _updateNotice = null;
-        });
-        _afterLibraryChanged();
-      },
+    setState(() => _view = _View.progress);
+    _flow.start(
+      title,
+      stream,
+      clearsUpdateNotice: clearsUpdateNotice,
+      onSuccess: onSuccess,
     );
-  }
-
-  /// הספרייה אולי השתנתה — הספירות והקטלוג נקראים ממנה מחדש.
-  void _afterLibraryChanged() {
-    unawaited(_loadStats());
-    _state.setCatalog(null);
-  }
-
-  Future<void> _cancel() async {
-    final flow = _flow;
-    if (flow == null || _cancelled || _committing) return;
-    _cancelled = true;
-    setState(() => _flowError = 'הפעולה בוטלה.');
-    // הסרגל נשאר נעול עד שהביטול באמת הסתיים, והספרייה נקראת מחדש: ייתכן
-    // שחלק מהעבודה כבר נכתב לפני שהביטול תפס.
-    await flow.cancel();
-    _flow = null;
-    if (!mounted) return;
-    setState(() => _flowActive = false);
-    _afterLibraryChanged();
   }
 
   // ── תצוגה ────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final flow = _flow;
     // גם אחרי "בוטלה" או שגיאה — כל עוד הזרם לא נסגר, העבודה עוד רצה.
-    final busy = _busy ||
+    final busy = flow.busy ||
         (_view == _View.progress &&
-            _flowError == null &&
-            _progress?.stage != FlowStage.done);
+            flow.error == null &&
+            flow.progress?.stage != FlowStage.done);
 
     final surfaces = AppSurfaces.of(context);
 
@@ -436,7 +448,7 @@ class _HomeShellState extends State<HomeShell> {
                   boxShadow: AppShadows.soft,
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: _body(),
+                child: _body(flow),
               ),
             ),
           ),
@@ -445,22 +457,32 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  Widget _body() => switch (_view) {
+  Widget _body(FlowController flow) => switch (_view) {
         _View.home => HomeScreen(
             onChooseBooks: () => setState(() => _view = _View.books),
             onCheckUpdates: _checkUpdates,
-            appUpdate: _appUpdate,
+            appUpdate: flow.appUpdate,
             onInstallAppUpdate: _installAppUpdate,
-            updateNotice: _updateNotice,
-            checking: _checking,
+            updateNotice: flow.updateNotice,
+            checking: flow.checking,
+            onFetchPending: () =>
+                _rebuildFromFull(_state.spec, title: 'מביא את הספרים'),
           ),
-        _View.books => BookSelectionScreen(onApply: _applySelection),
+        _View.books => BookSelectionScreen(
+            onApply: _applySelection,
+            onImport: _applyImported,
+          ),
+        _View.restore => RestoreScreen(
+            onRestore: (spec) => _rebuildFromFull(spec, title: 'מחזיר ספרים'),
+            onFetchFull: () =>
+                _rebuildFromFull(_state.spec, title: 'מוריד את הספרייה'),
+          ),
         _View.settings => const SettingsScreen(),
         _View.progress => ProgressScreen(
-            title: _progressTitle ?? '',
-            progress: _progress,
-            error: _flowError,
-            onCancel: _committing ? null : () => unawaited(_cancel()),
+            title: flow.title,
+            progress: flow.progress,
+            error: flow.error,
+            onCancel: flow.committing ? null : () => unawaited(flow.cancel()),
             onClose: () => setState(() => _view = _View.home),
           ),
       };
@@ -486,6 +508,7 @@ class _Sidebar extends StatelessWidget {
   static const List<({_View view, IconData icon, String label})> _items = [
     (view: _View.home, icon: Icons.auto_awesome_rounded, label: 'הספרייה'),
     (view: _View.books, icon: Icons.checklist_rounded, label: 'ניהול ספרים'),
+    (view: _View.restore, icon: Icons.restore_rounded, label: 'החזרת ספרים'),
     (view: _View.settings, icon: Icons.tune_rounded, label: 'הגדרות'),
   ];
 
