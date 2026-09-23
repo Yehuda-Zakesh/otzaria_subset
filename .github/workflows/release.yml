@@ -23,13 +23,6 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # שני ה-pubspec (root ו-app) תלויים ב-seforim_library_updater
-      # דרך path dependency ל-../Otzariya_update. בלי השכפול הזה שום
-      # דבר לא מתקמפל.
-      - name: Clone seforim_library_updater (Otzariya_update)
-        shell: pwsh
-        run: git clone --depth 1 https://github.com/Otzaria/Otzaria_Offline_update.git ..\Otzariya_update
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -136,6 +129,8 @@ jobs:
         with:
           tag_name: v${{ steps.bump-version.outputs.version }}
           name: v${{ steps.bump-version.outputs.version }}
-          files: installer/output/otzaria-subset-${{ steps.bump-version.outputs.version }}.exe
+          # שם בלי גרסה — ראו build.ps1. ‏AppUpdater בוחר לפי הסיומת, כך
+          # שגם גרסאות שכבר בשטח ימצאו את הקובץ.
+          files: installer/output/OtzariaSubset.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

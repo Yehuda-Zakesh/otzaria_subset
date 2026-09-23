@@ -15,8 +15,12 @@ dependencies:
     sdk: flutter
   # ‏PatchApplier ו-LogicalContentHasher באים משם ולא משוכפלים לכאן: הם
   # תרגום בית-בית של הצד הקוטליני, וכפילות שלהם תיסחף ממנו בשקט.
+  # נעוץ ל-commit: שכפול של HEAD היה שובר את הבנייה בשקט על כל שינוי שם.
+  # עדכון התלות הוא החלפת ה-ref כאן וב-app/pubspec.yaml יחד.
   seforim_library_updater:
-    path: ../Otzariya_update
+    git:
+      url: https://github.com/Otzaria/Otzaria_Offline_update.git
+      ref: 17bb5c599fe766fa27a0b3261f2639a8d9bb7e89
   meta: ^1.18.0
   path: ^1.9.1
   sqlite3: ^3.3.3
