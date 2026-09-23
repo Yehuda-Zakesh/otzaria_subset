@@ -11,9 +11,11 @@ import '../theme.dart';
 import '../widgets/disclaimer.dart';
 import '../widgets/error_report.dart';
 import '../widgets/icon_badge.dart';
+import '../widgets/offline_drive.dart';
 import '../widgets/update_guard.dart';
 
-/// הגדרות. שתי שאלות בלבד — כל השאר נגזר.
+/// הגדרות: שתי שאלות (מיקום הספרייה ומקור העדכונים) והכנת כונן למחשב
+/// מנותק. כל השאר נגזר.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -136,6 +138,11 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 20),
+            OfflineDriveCard(
+              libraryDbPath: state.paths.libraryDbPath,
+              suggestedFolder: settings.updateFolder,
             ),
             const SizedBox(height: 20),
             UpdateGuardBanner(
