@@ -8,11 +8,13 @@
 // מפרק משלנו, אין ספרייה חיצונית, וה-stub רק מעתיק בתים ומריץ.
 //
 // מצב שני: `--update <pid> <תיקייה>` — ממתין שהתהליך הנתון ייסגר, פורש
-// בכפייה לתיקייה הנתונה ומפעיל מחדש. זה מה שהעדכון העצמי מריץ.
+// בכפייה לתיקייה הנתונה ומפעיל מחדש. זה מה שהעדכון העצמי מריץ. באותו
+// מצב הוא גם מחליף את ה-EXE שליד התיקייה בעצמו — ראו RefreshLauncher.
 
 #include <windows.h>
 
 #include <cstdint>
+#include <cwchar>
 #include <string>
 
 namespace {
@@ -20,6 +22,10 @@ namespace {
 constexpr wchar_t kFolder[] = L"OtzariaSubset";
 constexpr wchar_t kAppExe[] = L"otzaria_subset_app.exe";
 constexpr wchar_t kStamp[] = L"version.txt";
+// שם ה-EXE בשחרור, בלי גרסה — כדי שעדכון עצמי יוכל לדרוס אותו במקומו.
+constexpr wchar_t kLauncher[] = L"OtzariaSubset.exe";
+// השמות שבהם יצאו גרסאות עד 0.1.2 (`otzaria-subset-<גרסה>.exe`).
+constexpr wchar_t kOldLauncherPrefix[] = L"otzaria-subset-";
 constexpr wchar_t kTitle[] = L"ספרייה חלקית לאוצריא";
 constexpr char kMagic[8] = {'O', 'T', 'Z', 'S', 'U', 'B', '0', '2'};
 
@@ -288,6 +294,43 @@ void Extract(const std::wstring& archive, const std::wstring& target) {
   ExitProcess(0);
 }
 
+bool EndsWithIgnoreCase(const std::wstring& text, const wchar_t* suffix) {
+  const size_t n = wcslen(suffix);
+  return text.size() >= n && _wcsicmp(text.c_str() + text.size() - n, suffix) == 0;
+}
+
+// אחרי עדכון עצמי: ה-EXE שליד התיקייה הוא מה שהמשתמש לוחץ עליו, ובלי
+// ההחלפה הזו הוא היה נשאר לנצח בגרסה ובשם הישנים. כל כשל כאן אינו
+// מפיל — התיקייה כבר מעודכנת, ו-ShouldDeploy מונע מה-EXE הישן לדרוס אותה.
+void RefreshLauncher(const std::wstring& self, const std::wstring& target) {
+  // רק תיקייה שאנחנו פרשנו (שמה kFolder). תוכנה שהועתקה ידנית למקום אחר
+  // לא אמורה לגלות EXE חדש שהופיע בתיקייה שמעליה.
+  const std::wstring parent = DirName(target);
+  if (parent.size() >= target.size() ||
+      _wcsicmp(target.c_str() + parent.size() + 1, kFolder) != 0)
+    return;
+
+  const std::wstring launcher = parent + L"\\" + kLauncher;
+  // מוחקים ישנים רק אחרי שהחדש במקומו — אחרת משתמש היה נשאר בלי שום EXE.
+  if (!CopyFileW(self.c_str(), launcher.c_str(), FALSE)) return;
+
+  // רק התבנית שלנו, כדי לא לגעת בקבצים של המשתמש. השם נבדק שוב אחרי
+  // החיפוש, כי FindFirstFileW מתאים גם שמות 8.3 וסיומות כמו `.exe1`.
+  WIN32_FIND_DATAW found{};
+  const std::wstring pattern = parent + L"\\" + kOldLauncherPrefix + L"*.exe";
+  const HANDLE find = FindFirstFileW(pattern.c_str(), &found);
+  if (find == INVALID_HANDLE_VALUE) return;
+  const size_t prefix = wcslen(kOldLauncherPrefix);
+  do {
+    const std::wstring name = found.cFileName;
+    if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) continue;
+    if (_wcsnicmp(name.c_str(), kOldLauncherPrefix, prefix) != 0) continue;
+    if (!EndsWithIgnoreCase(name, L".exe")) continue;
+    DeleteFileW((parent + L"\\" + name).c_str());
+  } while (FindNextFileW(find, &found));
+  FindClose(find);
+}
+
 // ‏--update <pid> <תיקייה>: ממתין שהתוכנה תיסגר לפני שמחליפים אותה
 // מתחתיה. בלי ההמתנה הזו הקבצים נעולים והפרישה נכשלת באמצע.
 bool ParseUpdateMode(DWORD* waitFor, std::wstring* target) {
@@ -347,5 +390,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   DeleteFileW(stamp.c_str());
   Extract(archive, target);
   WriteStamp(stamp, version);
+  // רק בעדכון: בהפעלה רגילה אנחנו עצמנו ה-EXE שליד התיקייה, ואם המשתמש
+  // קרא לו בשם אחר זו בחירה שלו.
+  if (update) RefreshLauncher(self, target);
   LaunchAndExit(target);
 }

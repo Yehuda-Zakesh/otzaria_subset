@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/app_updater.dart';
+import '../services/error_report.dart';
 import '../theme.dart';
 import 'format.dart';
 import 'icon_badge.dart';
@@ -72,21 +73,27 @@ class AppUpdateCard extends StatelessWidget {
 /// ו-`false` אם המשתמש ביטל — ביטול אינו תקלה ואינו מקפיץ הודעה.
 ///
 /// בהצלחה הוא **אינו חוזר**: הפורש עולה והאפליקציה נסגרת מתחתיו.
+///
+/// ‏[updater] ניתן להחלפה רק בשביל בדיקות — ההורדה האמיתית סוגרת את
+/// התהליך.
 Future<bool> showAppUpdateDialog(
   BuildContext context,
-  AppRelease release,
-) async =>
+  AppRelease release, {
+  AppUpdater updater = const AppUpdater(),
+}) async =>
     await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _AppUpdateDialog(release: release),
+      builder: (context) =>
+          _AppUpdateDialog(release: release, updater: updater),
     ) ??
     false;
 
 class _AppUpdateDialog extends StatefulWidget {
   final AppRelease release;
+  final AppUpdater updater;
 
-  const _AppUpdateDialog({required this.release});
+  const _AppUpdateDialog({required this.release, required this.updater});
 
   @override
   State<_AppUpdateDialog> createState() => _AppUpdateDialogState();
@@ -104,11 +111,16 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
   void initState() {
     super.initState();
     // כל סיום של ההזרמה הוא כשל — ראו AppUpdater.install.
-    _download = const AppUpdater().install(widget.release).listen(
+    _download = widget.updater.install(widget.release).listen(
       (value) {
         if (!_closed && mounted) setState(() => _progress = value);
       },
-      onError: (Object _) => _close(true),
+      // המשתמש רואה רק "העדכון לא הושלם"; הסיבה (למשל hash שלא תאם)
+      // נשמרת ביומן, כדי שדיווח תקלה יגיד מה קרה באמת.
+      onError: (Object error, StackTrace stack) {
+        ErrorLog.instance.recordError(error, stack);
+        _close(true);
+      },
       onDone: () => _close(true),
     );
   }

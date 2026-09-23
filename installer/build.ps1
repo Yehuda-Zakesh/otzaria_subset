@@ -60,7 +60,10 @@ if ($LASTEXITCODE -ne 0) { throw "דחיסת ה-xz נכשלה ($LASTEXITCODE)" }
 
 $outDir = Join-Path $installer 'output'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-$out = Join-Path $outDir "otzaria-subset-$Version.exe"
+# שם קבוע, בלי גרסה: ה-stub דורס את OtzariaSubset.exe שליד התיקייה בכל
+# עדכון עצמי, ושם עם גרסה היה משאיר ליד התיקייה EXE בשם ישן. הגרסה
+# עצמה נשמרת בחתימה שבסוף הקובץ.
+$out = Join-Path $outDir 'OtzariaSubset.exe'
 
 $stub = Join-Path $build 'Release\otzaria_stub.exe'
 $payloadSize = (Get-Item $archive).Length
