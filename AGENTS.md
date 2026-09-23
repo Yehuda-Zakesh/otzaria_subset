@@ -16,12 +16,18 @@
    שייך ל-README או לקובץ שב-`docs/`.
 
 **יש CI.** `.github/workflows/test.yml` רץ על כל push ל-`main` ובדרישה
-ידנית: format+analyze+test בשתי החבילות (שורש ו-`app/`).
+ידנית: format+analyze+test בשתי החבילות (שורש ו-`app/`), ו-`flutter
+build windows --release` ל-`app/`.
 `.github/workflows/release.yml` רץ רק בדרישה ידנית: מעלה patch version
 בנעילה הדדית בשני ה-`pubspec.yaml`, בונה, אורז ל-EXE יחיד ומפרסם
-Release — ראו §16. שני קבצי ה-workflow משכפלים את `seforim_library_updater`
-מ-`Otzaria/Otzaria_Offline_update` לפני הבנייה, כי ה-path dependency
-המקומי (`../Otzariya_update`) לא קיים אצל ה-runner.
+Release — ראו §16.
+
+**`seforim_library_updater` ו-`library_manager` הן תלויות git נעוצות
+ל-commit** (מ-`Otzaria/Otzaria_Offline_update`), עם **אותו `ref`**
+ב-`pubspec.yaml` וב-`app/pubspec.yaml`. עדכון התלות = החלפת ה-`ref`
+בשניהם יחד; `ref` שונה בין השניים נותן לשתי החבילות שתי גרסאות של אותו
+קוד. ה-workflows לא משכפלים דבר — `pub get` מושך. לפיתוח מול checkout
+מקומי: `pubspec_overrides.yaml` (ב-`.gitignore`, לא נכנס לריפו).
 
 ---
 
@@ -118,6 +124,19 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 נכנסים לספרייה. אל "תתקן" את זה בכך שתכניס אותם — ספר עם שורת `book`
 ובלי אף שורת טקסט נראה קיים ונפתח ריק. המסלול הוא `SubsetRebuilder`.
 
+**הממתינים נשמרים ב-`SubsetProfile.pendingBookIds`, לא נגזרים.** ספר
+ממתין אינו במסד, ואחרי הפעלה מחדש אין מאיפה לדעת שביקשו אותו.
+`SubsetUpdater.profileAfter` **מאחד** (ממתין שאינו ב-patch הבא אינו נראה
+לפתירה שלו, ובלי האיחוד היה נשכח) ומוריד רק מה שנכנס או הוחרג במפורש;
+`SubsetRebuilder.profileAfter` מנקה — חוץ מגזימה שהמקור שלה הוא הספרייה
+עצמה (`profileAfterInPlaceRebuild` ב-`update_flow.dart`), שם מה שלא נבנה
+נשאר ממתין.
+
+**ספר שכבר ממתין נשאר ממתין גם כש-patch נושא לו שורות.** אלה רק השורות
+**שהשתנו** — הכנסה שלו הייתה בדיוק הספר החצי-ריק שלמעלה. לכן
+`applyPatch(pendingBookIds:)` מעביר אותם ל-`resolveForPatch(knownPending:)`.
+`test/pending_books_test.dart` אוכף.
+
 ---
 
 ## 6. ‏SubsetUpdater
@@ -173,7 +192,8 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 
 ## 10. בדיקות
 
-261 בדיקות, כולן על **fixtures סינתטיים**.
+372 בדיקות במנוע (שורש) ו-95 באפליקציה (`app/test`), כולן על **fixtures
+סינתטיים**.
 
 **אף בדיקה לא נוגעת במסד אמיתי של אוצריא ואינה מכילה תוכן ספרים.** זו
 אינה רק הקפדה על זכויות: בדיקה שתלויה במסד של 7.4GB אינה בדיקה שרצה,
@@ -194,7 +214,8 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 
 **`deleteFullDbWhenDone` חייב להיות `false` במסלול הזה.** ברירת המחדל
 של `SubsetRebuilder` היא `true` — נכון כשהמקור הוא הורדה זמנית
-(`_runFull` בשינוי סכמה, שם המקור באמת נמחק בסוף). כאן המקור **הוא**
+(`_runFull` — שינוי סכמה, החזרת ספרים, ממתינים — שם המקור באמת נמחק
+בסוף). כאן המקור **הוא**
 היעד; מחיקה "בסיום" הייתה מוחקת את התת-קבוצה שזה עתה נבנתה.
 
 ---
@@ -214,6 +235,14 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 שמחזיק `BuildContext`, `TextEditingController` וכדומה, שאינם ניתנים
 לשליחה — וה-`Isolate.spawn` זורק `Invalid argument(s): object is
 unsendable`. ראו גם §9 למעלה, שהוא אותו כלל בצד המנוע.
+
+**כל פעולה ארוכה על הספרייה עוברת דרך `FlowController`
+(`app/lib/state/flow_controller.dart`)**: `guardLaunch` סביב הדיאלוגים
+שלפני הפעולה, ואז `start` עם הזרם. שם יושבים המנעול נגד הפעלה כפולה
+(גם מול בדיקת עדכונים ברקע), הביטול, נקודת האל-חזור (`committing` — אחריה
+אין ביטול), וקריאת הספרייה מחדש בסוף. `HomeShell` מחזיק רק דיאלוגים
+וניווט. פעולה חדשה שמריצה זרם משלה עוקפת את כל אלה — ולשתי פעולות
+במקביל על אותו `seforim.db` אין תיקון.
 
 ---
 
@@ -305,6 +334,54 @@ Windows עם מפרק בתוך ה-stub, וזה עלה **2.4MB בהורדה** ו�
 GitHub או תשובה בפורמט לא מוכר — כולם שקטים. מי שפתח את התוכנה כדי
 לגזום ספרים לא אמור לראות שגיאה על משהו שלא ביקש.
 
-**שם הקובץ ב-Release אינו חוזה — הסיומת כן.** `AppUpdater` בוחר את
-ה-asset הראשון שמסתיים ב-`.exe`, כדי ששינוי של שם הקובץ ב-`build.ps1`
-לא ישבור גרסאות שכבר יצאו לשטח.
+**העדכון העצמי נכשל סגור בלי SHA-256.** `AppUpdater` מחשב hash תוך
+כדי ההורדה ומשווה ל-`digest` שגיטהאב מדווח על ה-asset; Release בלי
+digest נדחה, וקובץ שלא אומת נמחק. אנחנו עומדים **להריץ** את הקובץ — אל
+תהפוך את החוסר ל"מדלגים על האימות".
+
+**בחירת ה-asset היא לפי הסיומת; שם הקובץ הוא חוזה של ה-stub.**
+`AppUpdater` בוחר את ה-asset הראשון שמסתיים ב-`.exe`, כדי שגרסאות
+שכבר בשטח ימצאו אותו גם אחרי שינוי שם (עד 0.1.2 הוא נקרא
+`otzaria-subset-<גרסה>.exe`). אבל מעכשיו השם קבוע —
+`OtzariaSubset.exe` (`build.ps1`, `release.yml`) — כי במצב `--update`
+ה-stub (`RefreshLauncher`) מעתיק את עצמו ל-`<תיקיית-אב>\OtzariaSubset.exe`
+ומוחק משם `otzaria-subset-*.exe` ישנים. שם עם גרסה היה משאיר ליד
+התיקייה EXE ישן שלחיצה עליו רק מפעילה (ראו `ShouldDeploy`). שינוי
+`kLauncher` מחייב שינוי ב-`build.ps1` וב-`release.yml` יחד.
+
+**`RefreshLauncher` פועל רק כשתיקיית היעד נקראת `OtzariaSubset`**, ורק
+אחרי שהפרישה הצליחה; הישנים נמחקים רק אחרי שהחדש הועתק. תוכנה שהועתקה
+ידנית למקום אחר לא אמורה לגלות EXE חדש בתיקייה שמעליה, ומשתמש לא אמור
+להישאר בלי אף EXE.
+
+---
+
+## 17. החזרת ספרים נשענת על תצלום הקטלוג המלא
+
+ספרייה גזומה אינה יודעת מה היה בה. לכן `LibraryCatalog.toJson` נשמר
+(`ProfileStore.saveCatalogSnapshot`) כ-`<id>.catalog` לצד הפרופיל, ו-
+`RestoreScreen` מציג `restorableCatalog(תצלום, כלל)`.
+
+**הסיומת היא `.catalog`, לא `.json`.** `ProfileStore.loadAll` קורא כל
+`.json` בתיקייה כפרופיל; תצלום בסיומת הזו היה נקרא כפרופיל פגום.
+
+**התצלום נלקח רק כשהמסד עדיין מלא**: לפני הגזימה הראשונה
+(`!profile.categoriesPruned` ב-`_applySelection`), ובכל בנייה ממסד מלא
+(`onFullCatalog` ב-`SubsetUpdateFlow.run`/`_runFull`, בזמן שהמסד המלא
+הזמני עוד על הדיסק). קטלוג שנקרא מספרייה גזומה היה "תצלום" בלי מה
+שנמחק — ואין אחריו מה להחזיר.
+
+**`restoreSpecFor` רק מוסיף.** ספר שנשמר נשאר, החרגה שלא הוחזרה נשארת,
+וענף שההחזרה לא נגעה בו אינו משנה צורה; ענף שההחזרה מילאה הופך לכלל
+קטגוריה, כמו ב-§14. `test/restore_plan_test.dart` אוכף.
+
+**כל מה שמביא ספר שאינו על הדיסק עובר ב-`_rebuildFromFull`**
+(`home_shell.dart`) = `SubsetUpdateFlow.check(forceFull: true)` ואז
+`run`: החזרה, "להביא עכשיו" של הממתינים, וייבוא בחירה שמרחיבה
+(`_applyImported`; ייבוא שרק מצמצם הוא גזימה רגילה — ההכרעה ב-
+`importNarrowsOnly`, מול התצלום בלבד). אין מסלול שני.
+
+**אומדן הגודל בעץ בספרייה גזומה מכויל מהתצלום.** בגזומה הטבלאות
+הגלובליות שלמות, והכיול מהקובץ מנפח כל ספר; `AppState.setCatalog`
+מחליף את `bytesPerLine` בזה של התצלום. הכיול עצמו (`calibrateBytesPerLine`)
+מבוסס על `book.totalLines` ו-`PRAGMA` — אל תחליף אותו בסריקת `line`.

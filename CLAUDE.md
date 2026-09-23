@@ -12,7 +12,7 @@
    ו-`analysis_options.yaml` משלה. יש להריץ `dart format` ו-`flutter
    analyze` **בשתיהן**; `analysis_options.yaml` בשורש מוציא במפורש את
    `app/**` מהאנליזה שלו.
-2. **`flutter test` חייב לעבור במלואו**, ובמיוחד
+2. **`flutter test` חייב לעבור במלואו, בשתי החבילות**, ובמיוחד
    `test/equivalence_test.dart` — הוא ההוכחה היחידה שהמסנן נכון. בדיקה
    שנופלת פירושה שהשינוי שגוי, לא שהבדיקה מחמירה מדי.
 3. **הערות קצרות, בעברית, ומסבירות *למה*** — שורה או שתיים.
@@ -25,12 +25,18 @@
 * **יש CI, ומריצים אותו לפני שמסתמכים על בדיקה מקומית בלבד.**
   `.github/workflows/test.yml` רץ על כל push ל-`main` (וגם בדרישה
   ידנית): `pub get`, `dart format --set-exit-if-changed` ו-`flutter
-  analyze` בשתי החבילות, ו-`flutter test` על השורש.
+  analyze` בשתי החבילות, `flutter test` בשתיהן, ו-`flutter build
+  windows --release` ל-`app/`.
   `.github/workflows/release.yml` רץ **רק בדרישה ידנית**: מעלה patch
   version בנעילה הדדית בשני ה-`pubspec.yaml`, מריץ את הבדיקות, בונה את
   האפליקציה (עם `--dart-define=APP_VERSION`), אורז אותה ב-
-  `installer/build.ps1` ל-**EXE יחיד שפורש תיקייה אחת לצדו**,
-  ומפרסם תג ו-GitHub Release. אותו EXE הוא גם מה שהעדכון העצמי של
+  `installer/build.ps1` ל-**EXE יחיד שפורש תיקייה אחת לצדו** (בשם
+  קבוע, `OtzariaSubset.exe`), ומפרסם תג ו-GitHub Release. אותו EXE הוא גם מה שהעדכון העצמי של
   התוכנה מוריד — ראו §16 ב-AGENTS.md.
+
+**`seforim_library_updater` ו-`library_manager` הן תלויות git נעוצות
+ל-commit**, עם אותו `ref` ב-`pubspec.yaml` וב-`app/pubspec.yaml`. עדכון
+התלות = החלפת ה-`ref` בשניהם יחד. checkout מקומי: `pubspec_overrides.yaml`
+(ב-`.gitignore`). ה-CI אינו משכפל ריפו שכן.
 
 יש להשיב למשתמש בעברית.

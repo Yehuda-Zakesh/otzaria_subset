@@ -21,7 +21,12 @@
 | חבילה | תיקייה | תפקיד |
 |---|---|---|
 | `otzaria_subset` | `lib/` | **המנוע** — לוגיקה טהורה, בלי widgets: גיזום, סינון patch, hash לוגי, פרופילים. `pubspec.yaml` ו-`analysis_options.yaml` משלה. |
-| `otzaria_subset_app` | `app/` | **האפליקציה** — Flutter ל-Windows. מסכים, זרימת עדכון, איתור התקנת אוצריא, הרצה ב-`Isolate`. תלויה ב-`otzaria_subset` דרך path dependency. |
+| `otzaria_subset_app` | `app/` | **האפליקציה** — Flutter ל-Windows. מסכים, זרימת עדכון, איתור התקנת אוצריא, הרצה ב-`Isolate`. תלויה ב-`otzaria_subset` דרך path dependency (`../`). |
+
+`seforim_library_updater` ו-`library_manager` (מ-`Otzaria/Otzaria_Offline_update`)
+הן תלויות **git נעוצות ל-commit**, עם אותו `ref` בשני ה-`pubspec.yaml`.
+עדכון התלות = החלפת ה-`ref` בשניהם יחד. לפיתוח מול checkout מקומי אפשר
+להוסיף `pubspec_overrides.yaml` (ב-`.gitignore`, לא נכנס לריפו).
 
 שתי החבילות חייבות לעבור `dart format` ו-`flutter analyze
 --no-fatal-infos` נקי — כל אחת מהתיקייה שלה. `analysis_options.yaml`
@@ -32,15 +37,16 @@
 **אין הורדה של מסד נפרד להתקנה.** המשתמש כבר הוריד את `seforim.db`
 המלא דרך אוצריא עצמה. הגיזום הראשוני בונה תת-קבוצה חדשה **לצד** הקובץ
 הקיים (staging), מאמת אותה, ורק אז מחליף אטומית — מקור ויעד הם אותו
-נתיב. הורדת מסד מלא נפרדת קורית רק במסלול הנדיר של שינוי סכמה (ראו
-למטה).
+נתיב. הורדת מסד מלא נפרדת קורית רק בשינוי סכמה, או כשהמשתמש מבקש ספרים
+שאינם על הדיסק (ממתינים, החזרה, ייבוא בחירה רחבה יותר) — ראו למטה.
 
 **שלושה מצבים, לא שניים:** גיזום ראשוני, עדכוני patch מסוננים שוטפים,
 ובנייה מחדש כשהבחירה מתרחבת (ספר חדש בקטגוריה שנבחרה, שאינו מגיע
 מ-patch) או כשהסכמה משתנה.
 
-**אין עדכון-עצמי ואין מערכת תוספים, במכוון.** האפליקציה מעדכנת רק את
-ספריית אוצריא, לא את עצמה, ואינה טוענת קוד חיצוני.
+**אין מערכת תוספים ואין קוד חיצוני, במכוון.** העדכון העצמי מוריד רק את
+אותו EXE שה-workflow פרסם, ומריץ אותו רק אחרי אימות SHA-256 — ראו
+"ההפצה: קובץ אחד" למטה.
 
 ---
 
@@ -121,9 +127,11 @@ byParent              → שורת ההורה שרדה — בדיקה מקומי
 | `SubsetUpdater` | מתזמר: אימות → סינון → החלה על העתק → אימות → החלפה |
 | `SubsetRebuilder` | בנייה מחדש (או גיזום במקום) ממסד מלא, כולל ביטול אינדקס החיפוש |
 | `SubsetHasher` | hash לוגי חלקי, בקידומת `subset:` |
-| `LibraryCatalog` / `readCatalogFromPath` | עץ הקטגוריות והספרים למסך הבחירה |
+| `LibraryCatalog` / `readCatalogFromPath` | עץ הקטגוריות והספרים למסך הבחירה; אומדן גודל לספר/ענף (`estimatedBytesOf`, `bytesUnder`) מ-`bytesPerLine` שמכויל מ-`book.totalLines` בלי סריקת `line`; `toJson`/`fromJson` לתצלום |
 | `RemovalSelection` / `keepSpecFor` (`removal_plan.dart`) | מתרגם סימון-למחיקה של המשתמש (מה שהעץ מציג) לכלל-שמירה (`SubsetSpec`) שהמנוע עובד איתו |
-| `ProfileStore` | פרופיל לכל מחשב יעד, JSON אטומי על הכונן |
+| `RestoreSelection` / `restorableCatalog` / `restoreSpecFor` (`restore_plan.dart`) | החזרת ספרים שנמחקו: מה אפשר להחזיר מול תצלום הקטלוג המלא, והרחבת הכלל — **רק מוסיפה** |
+| `SelectionExport` (`models/selection_export.dart`) | הבחירה (`SubsetSpec`) כקובץ JSON נייד בין מחשבים |
+| `ProfileStore` | פרופיל לכל מחשב יעד, JSON אטומי על הכונן; לצדו תצלום הקטלוג המלא (`<id>.catalog`) |
 | `MachineIdentity` | זיהוי עצמי של המחשב — המשתמש אינו בוחר פרופיל מרשימה |
 | `OtzariaUpdateGuard` | לוגיקת הכרעה טהורה (לא קורא בעצמו כלום): מקבל ערכים גולמיים וקובע אם עדכון הספרייה של אוצריא כבוי |
 
@@ -147,11 +155,14 @@ byParent              → שורת ההורה שרדה — בדיקה מקומי
 
 | רכיב | תפקיד |
 |---|---|
-| `HomeShell` + `HomeScreen` | מסך הבית: כמה ספרים, כמה מקום, מצב עדכון. שום מנגנון פנימי (גרסאות, hash, נתיבים) לא מגיע לכאן. |
-| `BookSelectionScreen` + `CategoryTree` (`widgets/category_tree.dart`) | עץ הבחירה — **סימון פירושו מחיקה** — עם debounce ואומדן חי דרך `SubsetResolver`, ותרגום ל-`SubsetSpec` דרך `keepSpecFor` |
+| `HomeShell` + `HomeScreen` | מסך הבית: כמה ספרים, כמה מקום, מצב עדכון. שום מנגנון פנימי (גרסאות, hash, נתיבים) לא מגיע לכאן. `HomeShell` מחזיק רק דיאלוגים וניווט. |
+| `FlowController` (`state/flow_controller.dart`) | המצב של הפעולות הארוכות: מנעול נגד הפעלה כפולה (`guardLaunch`), הרצה (`start`), ביטול ונקודת האל-חזור, התקדמות, בדיקת עדכוני ספרייה ועדכון עצמי |
+| `BookSelectionScreen` + `CategoryTree` (`widgets/category_tree.dart`) | עץ הבחירה — **סימון פירושו מחיקה** — עם debounce ואומדן חי דרך `SubsetResolver`, גודל לכל ספר וענף ומיון לפי גודל, ותרגום ל-`SubsetSpec` דרך `keepSpecFor`. גם ייצוא/ייבוא בחירה (`SelectionExport`) |
+| `RestoreScreen` | החזרת ספרים שנמחקו: עץ של `restorableCatalog(תצלום, כלל)` באותו `CategoryTree`, והרחבה דרך `restoreSpecFor` |
 | `AppTheme` / `AppColors` (`theme.dart`) | הזהות החזותית של האפליקציה — ראו "זהות חזותית" למטה |
 | `ProgressScreen` | מתרגם את שלבי המנוע לארבע תחנות: מוריד/מכין/מחיל/מסיים |
-| `SettingsScreen` | נתיב הספרייה (דריסה ידנית), מקור העדכונים |
+| `SettingsScreen` | נתיב הספרייה (דריסה ידנית), מקור העדכונים, הכנת כונן למחשב מנותק (`OfflineDriveCard`) |
+| `MirrorBuilder` (`services/mirror_builder.dart`) | מוריד לכונן את מה שהמחשב המנותק צריך, דרך `LibraryMirrorExporter` של אפסטרים |
 | `SubsetUpdateFlow` (`services/update_flow.dart`) | מחברת גילוי → תכנון → הורדה → סינון/גיזום לזרימה אחת |
 | `OtzariaInstallLocator` (`services/otzaria_install.dart`) | מאתר את התקנת אוצריא דרך `LibraryDbLocator` של `library_manager` — לא ניחוש נתיבים; גם קורא (`readUpdateSettings`) את הגדרות העדכון שלה |
 | `ZstdFileStream` (`services/zstd_stream.dart`) | פירוק zstd בהזרמה — קובץ→קובץ, וגם זרם רשת→קובץ כשמורידים מסד מלא |
@@ -162,6 +173,13 @@ byParent              → שורת ההורה שרדה — בדיקה מקומי
 ברירת המחדל היא אינטרנט (`GithubLibraryReleaseClient`); למחשב מנותק יש
 אפשרות לתיקייה מקומית (`LocalMirrorLibraryReleaseClient`), נבחרת
 במסך ההגדרות. אין מסלול שלישי.
+
+את התיקייה המקומית מכינים באותה תוכנה, במחשב מקוון (`OfflineDriveCard`
+במסך ההגדרות, `MirrorBuilder`). הלחיצה היא דרך הכונן עצמו: המחשב המנותק
+שומר עליו `computer-status.json` עם גרסת הספרייה שלו
+(`OfflineComputerStatus`), והמחשב המקוון מוריד רק מה שחסר מהגרסה הזו —
+או הכל, אם אין מצב ידוע או שביקשו גם ספרייה מלאה. אחרי עדכון מוצלח
+מהתיקייה המצב נכתב מחדש, כדי שהכנה הבאה לא תוריד שוב את מה שכבר הוחל.
 
 ### איתור אוצריא וחסימות
 
@@ -226,8 +244,14 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 ולכן אינו שם. **אין דרך להשיג אותו מקובץ עדכון.**
 
 זה מטופל במפורש: `PatchKeepResolution.pendingAcquisition` מחזיק ספרים
-כאלה, והם **אינם** נכנסים לספרייה חצי-ריקים. הם ממתינים להבאה ממסד מלא,
-והמשתמש רואה זאת במסך הבית — ראו `_PendingCard` ב-`home_screen.dart`.
+כאלה, והם **אינם** נכנסים לספרייה חצי-ריקים. הם נשמרים ב-
+`SubsetProfile.pendingBookIds` (גם אחרי הפעלה מחדש) וממתינים להבאה ממסד
+מלא. המשתמש רואה אותם במסך הבית, עם כפתור "להביא עכשיו" שמוריד את
+הספרייה המלאה ובונה ממנה — ראו `_PendingCard` ב-`home_screen.dart`.
+
+אותו מסלול משמש להחזרת ספרים שנמחקו (`RestoreScreen`) ולייבוא בחירה
+שמרחיבה את הקיימת: לפני הגזימה הראשונה, ובכל בנייה ממסד מלא, נשמר תצלום
+של הקטלוג המלא, וממנו יודעים מה אפשר להחזיר.
 
 ### 2. `migrations` לא ריקה → סירוב
 
@@ -247,13 +271,17 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 
 ## כשהסכמה משתנה
 
-שינוי סכמה שובר את קובצי ה-patch (כך גם באוצריא עצמה). זה המסלול היחיד
-שבו האפליקציה מורידה מסד נפרד:
+שינוי סכמה שובר את קובצי ה-patch (כך גם באוצריא עצמה). זה, יחד עם הבאת
+ספרים ממתינים, החזרת ספרים וייבוא בחירה רחבה יותר, המסלול היחיד שבו
+האפליקציה מורידה מסד נפרד:
 
 1. הורדת המסד המלא (~1.5GB דחוס) — הזרם עובר מהרשת ישר למחלץ
-   (`ZstdFileStream`), הארכיון אינו יורד לדיסק
-2. בנייה מחדש לפי הבחירה של הפרופיל, אל נתיב הספרייה של המשתמש
-3. מחיקת המסד המלא הזמני שהורד
+   (`ZstdFileStream`), הארכיון אינו יורד לדיסק. מסד שמתפרסם בחלקים
+   (`ReleaseAsset.isSplit`) יורד חלק אחר חלק כזרם zstd אחד, והמסך מציג
+   אחוזי הורדה
+2. קריאת הקטלוג המלא ושמירתו כתצלום, כל עוד המסד המלא קיים
+3. בנייה מחדש לפי הבחירה, אל נתיב הספרייה של המשתמש
+4. מחיקת המסד המלא הזמני שהורד
 
 **שיא התפוסה: ~7.4GB + התת-קבוצה.** ‏SQLite דורש גישה מקרית כדי לשאול,
 ולכן המסד המלא חייב להתממש פעם אחת — אין דרך לשאול זרם שמתפרק. לפני
@@ -270,7 +298,7 @@ subset_K(apply(patch, full))  ==  apply(filter_K(patch), subset_K(full))
 flutter pub get
 flutter test                              # כל הבדיקות
 flutter test test/equivalence_test.dart   # מבחן השקילות בלבד
-dart format .
+dart format lib test                      # לא `.` — app/ היא חבילה נפרדת
 flutter analyze --no-fatal-infos
 
 # האפליקציה
@@ -278,6 +306,7 @@ cd app
 flutter pub get
 dart format .
 flutter analyze --no-fatal-infos
+flutter test
 flutter run -d windows                    # הרצה
 flutter build windows --release           # בנייה
 ```
@@ -286,9 +315,11 @@ flutter build windows --release           # בנייה
 במסד אמיתי של אוצריא ואינה מכילה תוכן ספרים.**
 
 `.github/workflows/test.yml` מריץ את כל השלבים האלה אוטומטית על כל push
-ל-`main`. `.github/workflows/release.yml`, שרץ רק בדרישה ידנית, מוסיף
-בנייה, אריזה לקובץ הפצה יחיד (`installer/build.ps1`) ופרסום
-GitHub Release.
+ל-`main` — כולל `flutter test` ו-`flutter build windows --release`
+ב-`app/`, כדי שפלאגין או CMake שבורים יתגלו לפני שחרור.
+`.github/workflows/release.yml`, שרץ רק בדרישה ידנית, מוסיף אריזה לקובץ
+הפצה יחיד (`installer/build.ps1`) ופרסום GitHub Release. התלויות מ-git
+נמשכות ב-`pub get` הרגיל; אין שלב שמשכפל ריפו שכן.
 
 ### ההפצה: קובץ אחד
 
@@ -299,7 +330,7 @@ GitHub Release.
 יכול להחליף את התוכנה בעצמו**, כי התיקייה שייכת למשתמש.
 
 הקובץ בנוי משני חלקים מודבקים: `stub` זעיר
-(`installer/stub/stub.cpp`, כ-160 שורות Win32) ואחריו `.tar.xz` עם
+(`installer/stub/stub.cpp`, כ-400 שורות Win32) ואחריו `.tar.xz` עם
 פלט הבנייה, ובסוף חתימה של 32 בתים. **אין כאן מפרק משלנו ולא
 ספרייה חיצונית**: את הדחיסה עושה 7-Zip בזמן הבנייה, ואת הפריסה
 עושה ה-`tar.exe` שיושב ב-System32 מאז Windows 10 ונבנה עם liblzma.
@@ -307,8 +338,11 @@ GitHub Release.
 
 התוכנה בודקת בעלייה, ברקע, אם יצא Release חדש
 (`app/lib/services/app_updater.dart`), ואם כן מציעה כפתור. לחיצה
-מורידה את אותו EXE בדיוק ומריצה אותו כ-`--update <pid> <תיקייה>`:
-הוא ממתין שהתוכנה תיסגר (עד אז הקבצים נעולים), פורש מחדש ומפעיל.
+מורידה את אותו EXE בדיוק, מאמתת אותו מול ה-SHA-256 שגיטהאב מדווח
+(`digest` של ה-asset; Release בלי digest נדחה), ומריצה אותו כ-`--update
+<pid> <תיקייה>`: הוא ממתין שהתוכנה תיסגר (עד אז הקבצים נעולים), פורש
+מחדש, מחליף את `OtzariaSubset.exe` שליד התיקייה בעצמו (ומוחק EXE-ים
+ישנים בשם `otzaria-subset-*.exe`), ומפעיל.
 **הגרסה שהתוכנה מכירה על עצמה מוזרקת בבנייה**
 (`--dart-define=APP_VERSION`) מאותה שורת `version` שב-`pubspec.yaml`,
 כדי שלא יהיה מקור שני שיכול להיסחף ממנה. בנייה מקומית נושאת `0.0.0`
