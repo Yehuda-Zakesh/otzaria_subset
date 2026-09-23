@@ -101,6 +101,9 @@ class SubsetUpdater {
   /// להסתכל על מסד חלקי ולדעת אם עץ הקטגוריות שלו נגזם או שהספרייה
   /// המלאה פשוט לא כללה את הענפים האלה. ערך שגוי כאן מייצר הפרת מפתח
   /// זר — כשל רועש, לא שקט, אבל מיותר.
+  ///
+  /// [pendingBookIds] — `SubsetProfile.pendingBookIds`. ספר שכבר ממתין
+  /// נשאר ממתין גם כשה-patch נושא לו שורות: אלה רק השורות שהשתנו.
   SubsetUpdateResult applyPatch({
     required String subsetPath,
     required String patchPath,
@@ -108,6 +111,7 @@ class SubsetUpdater {
     required SubsetSpec spec,
     required String workDir,
     required bool categoriesPruned,
+    Set<int> pendingBookIds = const {},
     String? expectedHash,
     void Function(String stage)? onStage,
   }) {
@@ -149,7 +153,7 @@ class SubsetUpdater {
 
       // ── מי בפנים אחרי ה-patch, ומי ממתין להבאה ──
       onStage?.call('resolve');
-      final resolution = _resolve(subsetPath, spec, patchPath);
+      final resolution = _resolve(subsetPath, spec, patchPath, pendingBookIds);
 
       onStage?.call('filter');
       final report = filter.filter(
@@ -200,6 +204,10 @@ class SubsetUpdater {
   }
 
   /// מעדכן את הפרופיל מתוצאת עדכון. פונקציה טהורה — הקורא שומר.
+  ///
+  /// הממתינים **מצטברים**: ספר ממתין שנבחר דרך קטגוריה ואינו ב-patch הבא
+  /// אינו נראה לפתירה שלו כלל, ובלי האיחוד היה נשכח. יורדים רק ספרים
+  /// שנכנסו לספרייה, וספרים שהכלל מחריג במפורש.
   SubsetProfile profileAfter(
     SubsetProfile profile,
     SubsetUpdateResult result, {
@@ -210,14 +218,19 @@ class SubsetUpdater {
         schemaVersion: schemaVersion,
         subsetHash: result.subsetHash,
         lastAppliedAt: DateTime.now(),
+        pendingBookIds: {
+          ...profile.pendingBookIds,
+          ...result.pendingAcquisition,
+        }.difference(result.bookIds).difference(profile.spec.excludeBookIds),
       );
 
-  PatchKeepResolution _resolve(
-      String subsetPath, SubsetSpec spec, String patchPath) {
+  PatchKeepResolution _resolve(String subsetPath, SubsetSpec spec,
+      String patchPath, Set<int> pendingBookIds) {
     // ‏uri: true נדרש כדי ש-`mode=ro` ב-ATTACH של ה-patch ייחשב.
     final db = sqlite3.sqlite3.open(subsetPath, uri: true);
     try {
-      return resolver.resolveForPatch(db, spec, patchPath);
+      return resolver.resolveForPatch(db, spec, patchPath,
+          knownPending: pendingBookIds);
     } finally {
       db.close();
     }

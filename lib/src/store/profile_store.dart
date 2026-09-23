@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../engine/library_catalog.dart';
 import '../models/profile.dart';
 
 /// נזרק על כתיבה או קריאה שנכשלו.
@@ -128,13 +129,69 @@ class ProfileStore {
   }
 
   /// מוחק פרופיל. אינו נוגע ב-`seforim.db` של אותו מחשב — הרשומה נמחקת,
-  /// הספרייה עצמה נשארת שם עד שהמשתמש יסיר אותה בעצמו.
+  /// הספרייה עצמה נשארת שם עד שהמשתמש יסיר אותה בעצמו. תצלום הקטלוג של
+  /// הפרופיל נמחק איתו: בלי הפרופיל אין לו למי לשייך.
   bool delete(String id) {
+    deleteCatalogSnapshot(id);
     final file = _fileFor(id);
     if (!file.existsSync()) return false;
     file.deleteSync();
     return true;
   }
+
+  // ── תצלום הקטלוג המלא ────────────────────────────────────────────
+
+  /// סיומת נפרדת מ-`.json` בכוונה: [loadAll] קורא כל `.json` כפרופיל,
+  /// ותצלום שם היה מדווח כפרופיל פגום בכל טעינה.
+  static const String _snapshotExtension = '.catalog';
+
+  /// שומר אטומית את קטלוג הספרייה **המלאה** של [profileId] — הבסיס למסך
+  /// השחזור. לקרוא לפני הגיזום הראשון (או בכל בנייה ממסד מלא), כשהמסד
+  /// עוד שלם; קטלוג של ספרייה גזומה אינו רואה את מה שנמחק.
+  void saveCatalogSnapshot(String profileId, LibraryCatalog catalog) {
+    if (!directory.existsSync()) directory.createSync(recursive: true);
+    final target = _snapshotFor(profileId);
+    final tmp = File('${target.path}.tmp');
+    try {
+      // בלי הזחה: אלפי ספרים, ואף אחד לא קורא את הקובץ בעין.
+      tmp.writeAsStringSync(jsonEncode(catalog.toJson()), flush: true);
+      tmp.renameSync(target.path);
+    } catch (e) {
+      try {
+        if (tmp.existsSync()) tmp.deleteSync();
+      } catch (_) {}
+      throw ProfileStoreException('שמירת תצלום הקטלוג נכשלה: $e');
+    }
+  }
+
+  /// התצלום של [profileId], או `null` אם אין או שהוא פגום. פגום אינו
+  /// זורק: בלי תצלום המסך פשוט אינו מציע שחזור.
+  LibraryCatalog? loadCatalogSnapshot(String profileId) {
+    final file = _snapshotFor(profileId);
+    if (!file.existsSync()) return null;
+    try {
+      final raw = jsonDecode(file.readAsStringSync());
+      if (raw is! Map<String, dynamic>) return null;
+      return LibraryCatalog.fromJson(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// האם שמור תצלום ל-[profileId], בלי לפענח אותו.
+  bool hasCatalogSnapshot(String profileId) =>
+      _snapshotFor(profileId).existsSync();
+
+  /// מוחק את התצלום של [profileId]. `false` אם לא היה.
+  bool deleteCatalogSnapshot(String profileId) {
+    final file = _snapshotFor(profileId);
+    if (!file.existsSync()) return false;
+    file.deleteSync();
+    return true;
+  }
+
+  File _snapshotFor(String id) =>
+      File(p.join(directory.path, '$id$_snapshotExtension'));
 
   /// יוצר פרופיל חדש בשם [label], עם מזהה שאינו מתנגש בקיימים.
   SubsetProfile create(String label) {

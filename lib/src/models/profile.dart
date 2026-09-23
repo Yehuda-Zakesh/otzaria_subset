@@ -51,6 +51,11 @@ class SubsetProfile {
   /// הזה כדי לסנן את `upsert_category` באותו אופן שבו המסד נבנה.
   final bool categoriesPruned;
 
+  /// ספרים שהכלל בוחר אך לא הגיעו ב-patch — ממתינים להבאה ממסד מלא (§5
+  /// ב-AGENTS.md). נשמר ולא נגזר: ספר כזה אינו במסד, ואחרי הפעלה מחדש
+  /// אין מאיפה לדעת שהמשתמש ביקש אותו ולא קיבל.
+  final Set<int> pendingBookIds;
+
   const SubsetProfile({
     required this.id,
     required this.label,
@@ -62,6 +67,7 @@ class SubsetProfile {
     this.lastAppliedAt,
     this.severedLinkCount = 0,
     this.categoriesPruned = false,
+    this.pendingBookIds = const {},
   });
 
   /// האם כבר נבנתה ספרייה למחשב הזה.
@@ -80,6 +86,9 @@ class SubsetProfile {
     DateTime? lastAppliedAt,
     int? severedLinkCount,
     bool? categoriesPruned,
+
+    /// קבוצה ריקה מנקה את הממתינים; `null` משאיר אותם כמו שהם.
+    Set<int>? pendingBookIds,
   }) =>
       SubsetProfile(
         id: id,
@@ -92,6 +101,7 @@ class SubsetProfile {
         lastAppliedAt: lastAppliedAt ?? this.lastAppliedAt,
         severedLinkCount: severedLinkCount ?? this.severedLinkCount,
         categoriesPruned: categoriesPruned ?? this.categoriesPruned,
+        pendingBookIds: pendingBookIds ?? this.pendingBookIds,
       );
 
   Map<String, dynamic> toJson() => {
@@ -105,6 +115,7 @@ class SubsetProfile {
         'lastAppliedAt': lastAppliedAt?.toIso8601String(),
         'severedLinkCount': severedLinkCount,
         'categoriesPruned': categoriesPruned,
+        'pendingBookIds': pendingBookIds.toList()..sort(),
       };
 
   factory SubsetProfile.fromJson(Map<String, dynamic> json) {
@@ -126,6 +137,13 @@ class SubsetProfile {
       lastAppliedAt: rawDate is String ? DateTime.tryParse(rawDate) : null,
       severedLinkCount: (json['severedLinkCount'] as num?)?.toInt() ?? 0,
       categoriesPruned: json['categoriesPruned'] == true,
+      // קובץ פרופיל מגרסה קודמת אינו נושא את השדה — אין ממתינים ידועים.
+      pendingBookIds: json['pendingBookIds'] is List
+          ? {
+              for (final e in json['pendingBookIds'] as List)
+                if (e is num) e.toInt(),
+            }
+          : const {},
     );
   }
 

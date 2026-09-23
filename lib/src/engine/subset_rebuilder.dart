@@ -213,6 +213,8 @@ class SubsetRebuilder {
         lastAppliedAt: DateTime.now(),
         categoriesPruned: categoriesPruned,
         severedLinkCount: severedLinkCount,
+        // בנייה ממסד מלא מביאה כל מה שהכלל בוחר — אין עוד מה להמתין לו.
+        pendingBookIds: const {},
       );
 
   ({Set<int> bookIds, Set<int> categoryIds}) _resolve(

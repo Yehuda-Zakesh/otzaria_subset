@@ -22,6 +22,15 @@ export 'src/engine/index_invalidator.dart'
 export 'src/engine/subset_pruner.dart'
     show SubsetPruner, SubsetPruneResult, SubsetPruneException;
 export 'src/engine/removal_plan.dart' show RemovalSelection, keepSpecFor;
+export 'src/engine/restore_plan.dart'
+    show
+        RestoreSelection,
+        restoreSpecFor,
+        restorableCatalog,
+        specKeepsBook,
+        keptBookIds,
+        notKeptBookIds,
+        importNarrowsOnly;
 export 'src/engine/library_catalog.dart'
     show
         LibraryCatalog,
@@ -45,6 +54,7 @@ export 'src/engine/subset_resolver.dart' show SubsetResolver;
 export 'src/engine/subset_updater.dart'
     show SubsetUpdater, SubsetUpdateResult, SubsetUpdateException;
 export 'src/models/profile.dart' show SubsetProfile;
+export 'src/models/selection_export.dart' show SelectionExport;
 export 'src/models/subset_spec.dart'
     show SubsetSpec, SubsetPlan, SeveredLinkTarget, PatchKeepResolution;
 export 'src/models/table_scope.dart'

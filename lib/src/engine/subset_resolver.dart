@@ -109,11 +109,16 @@ class SubsetResolver {
   /// הגולמי (לפני סינון — הסינון תלוי בתוצאה הזו).
   /// מחזירה גם את הספרים שהכלל בוחר אך תוכנם אינו זמין — ראו
   /// [PatchKeepResolution] להסבר למה ההפרדה הזו חייבת להיות מפורשת.
+  ///
+  /// [knownPending] — ספרים שכבר ממתינים מעדכון קודם
+  /// (`SubsetProfile.pendingBookIds`). patch שנושא להם שורות נושא רק את
+  /// מה **שהשתנה**, ולכן הם נשארים ממתינים ולא נכנסים חצי-מלאים (§5).
   PatchKeepResolution resolveForPatch(
     sqlite3.Database subsetDb,
     SubsetSpec spec,
-    String patchPath,
-  ) {
+    String patchPath, {
+    Set<int> knownPending = const {},
+  }) {
     subsetDb.execute('ATTACH DATABASE ? AS praw', [patchPath]);
     try {
       final ids = <int>{};
@@ -172,7 +177,7 @@ class SubsetResolver {
       }
 
       final context = _categoryContext(subsetDb);
-      final split = _splitByAvailability(subsetDb, ids, context);
+      final split = _splitByAvailability(subsetDb, ids, context, knownPending);
       return PatchKeepResolution(
         keep: split.keep,
         pendingAcquisition: split.pendingAcquisition,
@@ -300,6 +305,7 @@ class SubsetResolver {
     sqlite3.Database db,
     Set<int> candidates,
     _CategoryContext context,
+    Set<int> knownPending,
   ) {
     if (candidates.isEmpty) {
       return const PatchKeepResolution(keep: {});
@@ -339,9 +345,10 @@ class SubsetResolver {
     }
 
     for (final id in candidates) {
-      if ((local.contains(id) ||
-              suppliedByPatch.contains(id) ||
-              emptyBooks.contains(id)) &&
+      // ממתין שאינו מקומי: השורות שב-patch הן רק מה שהשתנה בו, לא הספר.
+      final supplied =
+          suppliedByPatch.contains(id) && !knownPending.contains(id);
+      if ((local.contains(id) || supplied || emptyBooks.contains(id)) &&
           categoryAvailable(id)) {
         keep.add(id);
       } else {
@@ -395,31 +402,10 @@ class SubsetResolver {
     );
   }
 
-  /// בייטים לשורת `line` אחת, נמדד על המסד שמול העיניים.
-  ///
-  /// האומדן מתבסס על `book.totalLines` ולא על סריקת `line`: סריקה של
-  /// 4.7GB לכל תנועה של המשתמש ב-UI אינה אפשרות. הכיול מחלק את גודל
-  /// הקובץ בסך השורות, כך שהוא נשאר נכון גם כשהמסד גדל בין גרסאות.
-  _SizeCalibration _calibrate(sqlite3.Database db) {
-    final pageCount = db.select('PRAGMA page_count').first.values.first as int;
-    final pageSize = db.select('PRAGMA page_size').first.values.first as int;
-    final totalBytes = pageCount * pageSize;
-
-    final sum = db.select('SELECT SUM(totalLines) s FROM book').first['s'];
-    final totalLines = (sum as num?)?.toInt() ?? 0;
-
-    // ‏schema_meta, category, author וחבריהן נשארים במלואם בכל תת-קבוצה.
-    // הרצפה הזו נמדדה על מסד סכמה 5 (~20MB) ומוחזקת כקבוע: היא קטנה
-    // מכדי להצדיק שאילתת dbstat, שהיא סריקה מלאה.
-    const globalFloorBytes = 20 * 1024 * 1024;
-
-    final bytesPerLine =
-        totalLines > 0 ? (totalBytes - globalFloorBytes) / totalLines : 0.0;
-    return _SizeCalibration(
-      bytesPerLine: bytesPerLine < 0 ? 0 : bytesPerLine,
-      globalFloorBytes: globalFloorBytes,
-    );
-  }
+  _SizeCalibration _calibrate(sqlite3.Database db) => _SizeCalibration(
+        bytesPerLine: calibrateBytesPerLine(db),
+        globalFloorBytes: kGlobalFloorBytes,
+      );
 
   int _estimateBytes(sqlite3.Database db, _SizeCalibration cal) {
     final sum = db
@@ -487,6 +473,30 @@ class SubsetResolver {
         ),
     ];
   }
+}
+
+/// ‏schema_meta, category, author וחבריהן נשארים במלואם בכל תת-קבוצה.
+/// הרצפה הזו נמדדה על מסד סכמה 5 (~20MB) ומוחזקת כקבוע: היא קטנה מכדי
+/// להצדיק שאילתת dbstat, שהיא סריקה מלאה.
+const int kGlobalFloorBytes = 20 * 1024 * 1024;
+
+/// בייטים לשורת `line` אחת, נמדד על המסד שמול העיניים.
+///
+/// האומדן מתבסס על `book.totalLines` ולא על סריקת `line`: סריקה של
+/// 4.7GB לכל תנועה של המשתמש ב-UI אינה אפשרות. הכיול מחלק את גודל
+/// הקובץ בסך השורות, כך שהוא נשאר נכון גם כשהמסד גדל בין גרסאות.
+/// משותף לפותר ולקטלוג, כדי שהגודל בעץ והגודל בתוכנית יסכימו.
+double calibrateBytesPerLine(sqlite3.Database db) {
+  final pageCount = db.select('PRAGMA page_count').first.values.first as int;
+  final pageSize = db.select('PRAGMA page_size').first.values.first as int;
+  final totalBytes = pageCount * pageSize;
+
+  final sum = db.select('SELECT SUM(totalLines) s FROM book').first['s'];
+  final totalLines = (sum as num?)?.toInt() ?? 0;
+
+  final bytesPerLine =
+      totalLines > 0 ? (totalBytes - kGlobalFloorBytes) / totalLines : 0.0;
+  return bytesPerLine < 0 ? 0 : bytesPerLine;
 }
 
 class _CategoryContext {
