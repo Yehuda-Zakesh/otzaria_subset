@@ -19,11 +19,16 @@ class CategoryTree extends StatefulWidget {
   final RemovalSelection removal;
   final ValueChanged<RemovalSelection> onChanged;
 
+  /// תווית נגישות לתיבות הסימון. העץ משמש גם למסכים שבהם סימון אינו
+  /// מחיקה, ולכן המשמעות נקבעת בחוץ.
+  final String? checkboxLabel;
+
   const CategoryTree({
     super.key,
     required this.catalog,
     required this.removal,
     required this.onChanged,
+    this.checkboxLabel,
   });
 
   @override
@@ -37,6 +42,20 @@ class _CategoryTreeState extends State<CategoryTree> {
   /// בחיפוש לא הייתה ניתנת לסגירה.
   final Set<int> _collapsed = {};
   String _query = '';
+
+  /// מיון לפי גודל, מהגדול לקטן. ברירת המחדל היא סדר הספרייה, כי זה
+  /// הסדר שהמשתמש מכיר.
+  bool _bySize = false;
+
+  // הרשימות הממוינות נשמרות לכל קטגוריה: מיון מחדש בכל בנייה של כל
+  // שורה פתוחה היה מבוזבז, והגדלים אינם משתנים כל עוד הקטלוג אותו קטלוג.
+  final Map<int, List<CatalogCategory>> _sortedChildren = {};
+  final Map<int, List<CatalogBook>> _sortedBooks = {};
+  List<CatalogCategory>? _sortedRoots;
+
+  /// בלי כיול אין גדלים, ו-"0 B" בכל שורה היה מטעה יותר מהסתרה.
+  bool get _sizesKnown => widget.catalog.bytesPerLine > 0;
+  bool get _sorting => _bySize && _sizesKnown;
 
   // המצב הנגזר מחושב פעם אחת לכל בחירה ולא לכל שורה: חישוב לכל שורה
   // עובר על כל תת-העץ שלה, ועל אלפי ספרים זה ריבועי בכל בנייה.
@@ -56,8 +75,49 @@ class _CategoryTreeState extends State<CategoryTree> {
   @override
   void didUpdateWidget(CategoryTree oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.catalog, widget.catalog)) _matchCache.clear();
+    if (!identical(oldWidget.catalog, widget.catalog)) {
+      _matchCache.clear();
+      _clearSorted();
+    }
   }
+
+  void _clearSorted() {
+    _sortedChildren.clear();
+    _sortedBooks.clear();
+    _sortedRoots = null;
+  }
+
+  // ‏bytesUnder נשלף ממפה שהקטלוג בונה פעם אחת, ולכן המיון אינו סורק
+  // תת-עצים. שובר השוויון הוא הסדר המקורי — List.sort אינו יציב.
+  List<CatalogCategory> _orderCategories(List<CatalogCategory> list) {
+    if (!_sorting || list.length < 2) return list;
+    final catalog = widget.catalog;
+    final index = {for (var i = 0; i < list.length; i++) list[i].id: i};
+    return [...list]..sort((a, b) {
+        final bySize =
+            catalog.bytesUnder(b.id).compareTo(catalog.bytesUnder(a.id));
+        return bySize != 0 ? bySize : index[a.id]!.compareTo(index[b.id]!);
+      });
+  }
+
+  List<CatalogBook> _orderBooks(List<CatalogBook> list) {
+    if (!_sorting || list.length < 2) return list;
+    final catalog = widget.catalog;
+    final index = {for (var i = 0; i < list.length; i++) list[i].id: i};
+    return [...list]..sort((a, b) {
+        final bySize =
+            catalog.estimatedBytesOf(b).compareTo(catalog.estimatedBytesOf(a));
+        return bySize != 0 ? bySize : index[a.id]!.compareTo(index[b.id]!);
+      });
+  }
+
+  List<CatalogCategory> _childrenOf(int id) =>
+      _sortedChildren[id] ??= _orderCategories(
+        widget.catalog.childrenOf[id] ?? const <CatalogCategory>[],
+      );
+
+  List<CatalogBook> _booksOf(int id) => _sortedBooks[id] ??=
+      _orderBooks(widget.catalog.booksOf[id] ?? const <CatalogBook>[]);
 
   @override
   Widget build(BuildContext context) {
@@ -66,19 +126,39 @@ class _CategoryTreeState extends State<CategoryTree> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-          child: TextField(
-            // בלי border מפורש — השדה מקבל את העיצוב הכללי
-            // מ-InputDecorationTheme ולא נראה שונה משאר האפליקציה.
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
-              hintText: 'חיפוש ספר או קטגוריה',
-              isDense: true,
-            ),
-            onChanged: (value) => setState(() {
-              _query = value.trim();
-              _matchCache.clear();
-              _collapsed.clear();
-            }),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  // בלי border מפורש — השדה מקבל את העיצוב הכללי
+                  // מ-InputDecorationTheme ולא נראה שונה משאר האפליקציה.
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search_rounded),
+                    hintText: 'חיפוש ספר או קטגוריה',
+                    isDense: true,
+                  ),
+                  onChanged: (value) => setState(() {
+                    _query = value.trim();
+                    _matchCache.clear();
+                    _collapsed.clear();
+                  }),
+                ),
+              ),
+              if (_sizesKnown) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  key: const ValueKey('sort-by-size'),
+                  isSelected: _bySize,
+                  tooltip: _bySize ? 'מיון לפי סדר הספרייה' : 'מיון לפי גודל',
+                  icon: const Icon(Icons.sort_rounded),
+                  selectedIcon: const Icon(Icons.format_list_numbered_rounded),
+                  onPressed: () => setState(() {
+                    _bySize = !_bySize;
+                    _clearSorted();
+                  }),
+                ),
+              ],
+            ],
           ),
         ),
         Expanded(
@@ -113,7 +193,9 @@ class _CategoryTreeState extends State<CategoryTree> {
   /// בחיפוש מוצגות רק קטגוריות שיש תחתיהן התאמה, והן נפתחות מאליהן —
   /// אחרת המשתמש היה מקבל רשימה סגורה בלי לדעת מה בתוכה.
   List<CatalogCategory> _visibleRoots() =>
-      widget.catalog.roots.where((c) => _query.isEmpty || _matches(c)).toList();
+      (_sortedRoots ??= _orderCategories(widget.catalog.roots))
+          .where((c) => _query.isEmpty || _matches(c))
+          .toList();
 
   /// זיכרון לכל חיפוש: בלעדיו כל שורה סורקת שוב את כל תת-העץ שלה.
   bool _matches(CatalogCategory category) {
@@ -149,9 +231,8 @@ class _CategoryTreeState extends State<CategoryTree> {
     int depth, {
     required bool filtering,
   }) {
-    final children =
-        widget.catalog.childrenOf[category.id] ?? const <CatalogCategory>[];
-    final books = widget.catalog.booksOf[category.id] ?? const <CatalogBook>[];
+    final children = _childrenOf(category.id);
+    final books = _booksOf(category.id);
     final autoOpen = filtering && _matches(category);
     final open = !_collapsed.contains(category.id) &&
         (_expanded.contains(category.id) || autoOpen);
@@ -168,6 +249,8 @@ class _CategoryTreeState extends State<CategoryTree> {
         open: open,
         hasChildren: children.isNotEmpty || books.isNotEmpty,
         bookCount: marks.total[category.id] ?? 0,
+        bytes: _sizesKnown ? widget.catalog.bytesUnder(category.id) : null,
+        checkboxLabel: widget.checkboxLabel,
         onToggleOpen: () => setState(() {
           if (open) {
             _expanded.remove(category.id);
@@ -190,6 +273,8 @@ class _CategoryTreeState extends State<CategoryTree> {
               book: book,
               depth: depth + 1,
               checked: marks.isMarked(book),
+              bytes: _sizesKnown ? widget.catalog.estimatedBytesOf(book) : null,
+              checkboxLabel: widget.checkboxLabel,
               onToggle: () => _toggleBook(book),
             ),
       ],
@@ -352,6 +437,10 @@ class _CategoryRow extends StatelessWidget {
   final bool open;
   final bool hasChildren;
   final int bookCount;
+
+  /// ‏`null` כשהגדלים אינם ידועים — ואז אין מה להציג.
+  final int? bytes;
+  final String? checkboxLabel;
   final VoidCallback onToggleOpen;
   final VoidCallback onToggleChecked;
 
@@ -363,6 +452,8 @@ class _CategoryRow extends StatelessWidget {
     required this.open,
     required this.hasChildren,
     required this.bookCount,
+    required this.bytes,
+    required this.checkboxLabel,
     required this.onToggleOpen,
     required this.onToggleChecked,
   });
@@ -402,6 +493,7 @@ class _CategoryRow extends StatelessWidget {
                       : null,
                 ),
                 Checkbox(
+                  semanticLabel: checkboxLabel,
                   tristate: true,
                   value: switch (state) {
                     TriState.none => false,
@@ -420,6 +512,10 @@ class _CategoryRow extends StatelessWidget {
                         ),
                   ),
                 ),
+                if (bytes case final size? when size > 0) ...[
+                  _SizeText(bytes: size),
+                  const SizedBox(width: 8),
+                ],
                 if (bookCount > 0)
                   _CountChip(
                     text: formatQuantity(bookCount,
@@ -461,10 +557,29 @@ class _CountChip extends StatelessWidget {
   }
 }
 
+/// גודל משוער בגוון משני — מידע עזר, לא העיקר בשורה.
+class _SizeText extends StatelessWidget {
+  final int bytes;
+
+  const _SizeText({required this.bytes});
+
+  @override
+  Widget build(BuildContext context) => Text(
+        '~${formatBytes(bytes)}',
+        // ‏"MB" לטיני; בלי כיוון מפורש ה-~ היה נודד לצד הלא נכון ב-RTL.
+        textDirection: TextDirection.ltr,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      );
+}
+
 class _BookRow extends StatelessWidget {
   final CatalogBook book;
   final int depth;
   final bool checked;
+  final int? bytes;
+  final String? checkboxLabel;
   final VoidCallback onToggle;
 
   const _BookRow({
@@ -472,6 +587,8 @@ class _BookRow extends StatelessWidget {
     required this.book,
     required this.depth,
     required this.checked,
+    required this.bytes,
+    required this.checkboxLabel,
     required this.onToggle,
   });
 
@@ -493,20 +610,30 @@ class _BookRow extends StatelessWidget {
             child: Row(
               children: [
                 const SizedBox(width: 24),
-                Checkbox(value: checked, onChanged: (_) => onToggle()),
+                Checkbox(
+                  semanticLabel: checkboxLabel,
+                  value: checked,
+                  onChanged: (_) => onToggle(),
+                ),
                 Expanded(
                   child: Text(
                     book.title,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ),
-                Text(
-                  formatQuantity(book.totalLines,
-                      one: 'שורה אחת', many: 'שורות'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
+                // כשהגודל ידוע הוא מה שמעניין את מי שמפנה מקום; מספר
+                // השורות נשאר כתחליף רק כשאין כיול.
+                if (bytes case final size?) ...[
+                  // ספר בלי שורות אינו תופס מקום; "0 B" רק היה מבלבל.
+                  if (size > 0) _SizeText(bytes: size),
+                ] else
+                  Text(
+                    formatQuantity(book.totalLines,
+                        one: 'שורה אחת', many: 'שורות'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
               ],
             ),
           ),
