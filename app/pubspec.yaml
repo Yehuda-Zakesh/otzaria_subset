@@ -3,7 +3,7 @@ description: >-
   ממשק המשתמש למנוע הספרייה החלקית: בחירת ספרים, בנייה, עדכון ואימות.
   המנוע עצמו יושב ב-`otzaria_subset` ונשאר חבילת לוגיקה בלי תלות ב-UI.
 publish_to: none
-version: 0.1.1
+version: 0.1.0
 environment:
   sdk: ">=3.2.6 <4.0.0"
   flutter: ">=3.19.0"
