@@ -144,6 +144,40 @@ void main() {
           reason: 'dryRun הוא מה שה-UI מציג לפני שהמשתמש מאשר');
     });
 
+    test('תיקייה שמכילה seforim.db אינה נמחקת גם כשיש בה meta.json', () {
+      // נתיב אינדקס מוגדר שגוי שמצביע על תיקיית הספרייה.
+      final d = makeDir('lib', marker: 'meta.json');
+      File(p.join(d, 'Seforim.db')).writeAsStringSync('library');
+      expect(
+        () => inv.invalidate(d),
+        throwsA(isA<IndexInvalidationException>()),
+      );
+      expect(File(p.join(d, 'Seforim.db')).existsSync(), isTrue);
+    });
+
+    test('תיקייה שמכילה נתיב מוגן אינה נמחקת', () {
+      final d = makeDir('idx', marker: 'meta.json');
+      final lib = p.join(d, 'sub', 'my-library.db');
+      Directory(p.dirname(lib)).createSync();
+      File(lib).writeAsStringSync('library');
+      expect(
+        () => inv.invalidate(d, protectedPaths: [lib]),
+        throwsA(isA<IndexInvalidationException>()),
+      );
+      expect(File(lib).existsSync(), isTrue);
+    });
+
+    test('נתיב יחסי או שורש כונן נדחים', () {
+      expect(
+        () => inv.invalidate('index'),
+        throwsA(isA<IndexInvalidationException>()),
+      );
+      expect(
+        () => inv.invalidate(p.rootPrefix(dir.path), dryRun: true),
+        throwsA(isA<IndexInvalidationException>()),
+      );
+    });
+
     test('תת-תיקיות נספרות ונמחקות', () {
       final d = makeDir('idx', marker: 'meta.json', bytes: 10);
       final sub = Directory(p.join(d, 'segments'))..createSync();

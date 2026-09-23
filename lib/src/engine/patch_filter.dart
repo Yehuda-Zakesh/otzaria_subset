@@ -116,8 +116,8 @@ class PatchFilter {
       if (refuseMigrations) _assertNoMigrations(db);
 
       onStage?.call('schema');
-      db.execute('PRAGMA journal_mode = OFF');
-      db.execute('PRAGMA synchronous = OFF');
+      db.execute('PRAGMA main.journal_mode = OFF');
+      db.execute('PRAGMA main.synchronous = OFF');
       for (final row in db.select(
         "SELECT sql FROM p.sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL",
@@ -298,21 +298,35 @@ class PatchFilter {
   /// ומתחזה לשורה מעודכנת.
   int _synthesizeDeletes(
       sqlite3.Database db, TableScope scope, List<String> cols) {
-    if (scope.kind != ScopeKind.byBook) return 0;
+    if (scope.kind == ScopeKind.global) return 0;
     final deleteTable = 'delete_${scope.name}';
     if (!_has(db, 'main', deleteTable)) return 0;
     if (!_has(db, 'sub', scope.name)) return 0;
 
     final pk = _primaryKeyOf(scope.name);
     if (pk == null || pk.any((c) => !cols.contains(c))) return 0;
+    final joinOn = pk.map((c) => 's."$c" = u."$c"').join(' AND ');
+    final pkCsv = pk.map((c) => '"$c"').join(',');
+    final pkSel = pk.map((c) => 'u."$c"').join(',');
+
+    if (scope.kind == ScopeKind.byParent) {
+      // הורה שאינו בעמודות ה-PK (כמו `line_toc.tocEntryId`) יכול להשתנות
+      // להורה שלא שרד; ה-upsert נופל, והשורה המקומית נשארת עם ההפניה הישנה.
+      final keptOn = pk.map((c) => 'k."$c" = u."$c"').join(' AND ');
+      db.execute(
+        'INSERT OR IGNORE INTO main."$deleteTable" ($pkCsv) '
+        'SELECT $pkSel FROM p."upsert_${scope.name}" u '
+        'JOIN sub."${scope.name}" s ON $joinOn '
+        'WHERE NOT EXISTS (SELECT 1 FROM main."upsert_${scope.name}" k '
+        'WHERE $keptOn)',
+      );
+      return db.updatedRows;
+    }
     final present = scope.bookColumns.where((c) => cols.contains(c)).toList();
     if (present.length != scope.bookColumns.length) return 0;
 
     final outside =
         present.map((c) => 'u."$c" NOT IN (${KeepSet.selectIds})').join(' OR ');
-    final joinOn = pk.map((c) => 's."$c" = u."$c"').join(' AND ');
-    final pkCsv = pk.map((c) => '"$c"').join(',');
-    final pkSel = pk.map((c) => 'u."$c"').join(',');
 
     db.execute(
       'INSERT OR IGNORE INTO main."$deleteTable" ($pkCsv) '

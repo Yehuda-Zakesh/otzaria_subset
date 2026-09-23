@@ -44,9 +44,10 @@ class OtzariaInstallLocator {
 
   Future<OtzariaInstall> locate({String? overridePath}) async {
     final override = overridePath?.trim();
-    if (override != null &&
-        override.isNotEmpty &&
-        File(override).existsSync()) {
+    if (override != null && override.isNotEmpty) {
+      // נתיב שנבחר ביד ונעלם (כונן מנותק) אינו נופל לאיתור אוטומטי: הפרופיל
+      // אחד למחשב, ונפילה שקטה הייתה מחילה אותו על ספרייה אחרת.
+      if (!File(override).existsSync()) return const OtzariaInstall();
       return OtzariaInstall(
         libraryDbPath: override,
         indexDir: _indexFor(override),

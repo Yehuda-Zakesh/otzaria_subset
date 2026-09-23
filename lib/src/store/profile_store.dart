@@ -74,14 +74,34 @@ class ProfileStore {
   /// פרופיל לפי מזהה, או `null`.
   SubsetProfile? load(String id) {
     final file = _fileFor(id);
-    if (!file.existsSync()) return null;
+    if (!file.existsSync()) return _recoverFromTmp(file);
     try {
-      final raw = jsonDecode(file.readAsStringSync());
-      if (raw is! Map<String, dynamic>) return null;
-      return SubsetProfile.fromJson(raw);
+      return _parse(file);
     } catch (_) {
       return null;
     }
+  }
+
+  /// גרסה קודמת מחקה את הקובץ לפני ה-rename, ונפילה ברגע הזה השאירה רק
+  /// ‏`.tmp` שלם. בלי שחזור המחשב היה מקבל פרופיל ריק ומאבד את הרשומה.
+  SubsetProfile? _recoverFromTmp(File target) {
+    final tmp = File('${target.path}.tmp');
+    try {
+      if (!tmp.existsSync()) return null;
+      final profile = _parse(tmp);
+      if (profile == null) return null;
+      tmp.renameSync(target.path);
+      return profile;
+    } catch (_) {
+      // ‏.tmp חתוך הוא שארית של כתיבה שנכשלה, לא פרופיל.
+      return null;
+    }
+  }
+
+  SubsetProfile? _parse(File file) {
+    final raw = jsonDecode(file.readAsStringSync());
+    if (raw is! Map<String, dynamic>) return null;
+    return SubsetProfile.fromJson(raw);
   }
 
   /// שומר פרופיל אטומית.
@@ -94,10 +114,8 @@ class ProfileStore {
         const JsonEncoder.withIndent('  ').convert(profile.toJson()),
         flush: true,
       );
-      // ‏rename על אותו כרך הוא אטומי: או הקובץ הישן או החדש, לא חצי.
-      // ב-Windows אין דריסה ב-rename, ולכן מוחקים קודם — החלון הקצר
-      // הזה מכוסה בכך שה-`.tmp` כבר כתוב ונשטף לדיסק.
-      if (target.existsSync()) target.deleteSync();
+      // ‏rename של Dart דורס גם ב-Windows (MOVEFILE_REPLACE_EXISTING).
+      // אסור למחוק קודם: rename שנכשל אחרי המחיקה השאיר בלי קובץ ובלי .tmp.
       tmp.renameSync(target.path);
     } catch (e) {
       try {

@@ -87,9 +87,15 @@ void installErrorLogging() {
 String maskPaths(String text, {String? home}) {
   final root = home ?? Platform.environment['USERPROFILE'];
   if (root == null || root.isEmpty) return text;
-  // שני סוגי המפריד: אותו נתיב מגיע גם עם `\` וגם עם `/`.
+  // שני סוגי המפריד: אותו נתיב מגיע גם עם `\` וגם עם `/`, ולפעמים כפול
+  // (מחרוזת JSON). מפצלים לפני ה-escape: אחריו כל `\` כבר הוכפל, ו-`[\/]`
+  // תאם רק `/` — כך שהנתיב הרגיל של Windows לא הוסתר כלל.
   final pattern = RegExp(
-    RegExp.escape(root).replaceAll(r'\', r'[\/]'),
+    root
+        .split(RegExp(r'[\\/]+'))
+        .where((part) => part.isNotEmpty)
+        .map(RegExp.escape)
+        .join(r'[\\/]+'),
     caseSensitive: false,
   );
   return text.replaceAll(pattern, '%USERPROFILE%');

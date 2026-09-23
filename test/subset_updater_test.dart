@@ -291,6 +291,93 @@ void main() {
     });
   });
 
+  group('רגרסיה', () {
+    test('WAL חם של המסד נשמר בעדכון ואינו מוחל אחר כך על הקובץ החדש', () {
+      final subset = buildSubset();
+      // מצב אחרי קריסה: שינוי שנכתב רק ל-WAL, והקובץ הראשי עוד בלעדיו.
+      final db = sqlite3.sqlite3.open(subset);
+      try {
+        db.execute('PRAGMA journal_mode = WAL');
+        db.execute('PRAGMA wal_autocheckpoint = 0');
+        db.execute("UPDATE line SET content = 'מה-WAL' WHERE id = 101");
+        File(subset).copySync('$subset.crash');
+        File('$subset-wal').copySync('$subset.crash-wal');
+      } finally {
+        db.close();
+      }
+      File('$subset.crash').copySync(subset);
+      File('$subset.crash-wal').copySync('$subset-wal');
+      File('$subset.crash').deleteSync();
+      File('$subset.crash-wal').deleteSync();
+
+      buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2, mutate: (db) {
+        db.execute("INSERT INTO upsert_line VALUES (100, 1, 0, 'עודכן', 6)");
+        db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+      });
+
+      final result = const SubsetUpdater().applyPatch(
+        subsetPath: subset,
+        patchPath: at('patch.db'),
+        manifest: manifest(),
+        spec: spec,
+        workDir: work(),
+        categoriesPruned: false,
+      );
+
+      expect(File('$subset-wal').existsSync(), isFalse);
+      final check =
+          sqlite3.sqlite3.open(subset, mode: sqlite3.OpenMode.readOnly);
+      try {
+        String contentOf(int id) => check.select(
+                'SELECT content FROM line WHERE id = ?', [id]).first['content']
+            as String;
+        expect(contentOf(100), 'עודכן');
+        expect(contentOf(101), 'מה-WAL',
+            reason: 'שינוי שהיה רק ב-WAL אבד בהעתקה');
+      } finally {
+        check.close();
+      }
+      expect(hashOf(subset), result.subsetHash);
+      expect(leftoverWorkFiles(), 0);
+    });
+
+    test(
+      'כשל במחיקת ה-.bak אחרי החלפה מוצלחת אינו הופך את העדכון לכישלון',
+      () {
+        final subset = buildSubset();
+        buildPatchDb(at('patch.db'), fromVersion: 1, toVersion: 2,
+            mutate: (db) {
+          db.execute(
+              "INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+        });
+        addTearDown(() {
+          for (final f in [subset, '$subset.bak']) {
+            if (File(f).existsSync()) Process.runSync('attrib', ['-R', f]);
+          }
+        });
+
+        final result = const SubsetUpdater().applyPatch(
+          subsetPath: subset,
+          patchPath: at('patch.db'),
+          manifest: manifest(),
+          spec: spec,
+          workDir: work(),
+          categoriesPruned: false,
+          onStage: (stage) {
+            // קובץ לקריאה בלבד עובר rename אבל לא מחיקה — בדיוק מה
+            // שקורה לגיבוי אחרי שהחדש כבר נכנס למקומו.
+            if (stage == 'swap') Process.runSync('attrib', ['+R', subset]);
+          },
+        );
+
+        expect(result.toVersion, 2);
+        expect(hashOf(subset), result.subsetHash,
+            reason: 'המסד שבמקום הוא החדש, והתוצאה חייבת לתאר אותו');
+      },
+      skip: !Platform.isWindows,
+    );
+  });
+
   group('profileAfter', () {
     test('מעדכן גרסה, hash ותאריך ושומר את השאר', () {
       const profile = SubsetProfile(

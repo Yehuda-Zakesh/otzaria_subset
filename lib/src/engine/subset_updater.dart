@@ -8,6 +8,8 @@ import '../models/profile.dart';
 import '../models/subset_spec.dart';
 import 'patch_filter.dart';
 import 'subset_hasher.dart';
+import 'subset_rebuilder.dart'
+    show settleSqliteSidecars, moveSqliteSidecars, deleteSqliteFile;
 import 'subset_resolver.dart';
 
 /// נזרק כשעדכון תת-קבוצה נכשל. המסד של המשתמש נשאר כשהיה.
@@ -124,6 +126,14 @@ class SubsetUpdater {
     final filtered = File(p.join(workDir, 'patch-$stamp.filtered.db'));
 
     try {
+      // ‏WAL חם של המסד אינו נכלל בהעתקה, ואחרי ההחלפה היה מוחל על הקובץ
+      // החדש לפי השם. מקפלים אותו לתוך הקובץ לפני שנוגעים בו.
+      try {
+        settleSqliteSidecars(subsetPath);
+      } catch (e) {
+        throw SubsetUpdateException('הספרייה החלקית אינה במצב עקבי: $e');
+      }
+
       // ── הגרסה שלפני: תואמת למה שנרשם? ──
       if (expectedHash != null) {
         onStage?.call('verifyLocal');
@@ -182,10 +192,9 @@ class SubsetUpdater {
         filterReport: report,
       );
     } finally {
+      // כולל קובצי ה-journal/WAL שלהם, שנשארים אחרי כשל באמצע ההחלה.
       for (final f in [staged, filtered]) {
-        try {
-          if (f.existsSync()) f.deleteSync();
-        } catch (_) {}
+        deleteSqliteFile(f.path);
       }
     }
   }
@@ -252,18 +261,34 @@ class SubsetUpdater {
   void _swap(File staged, File target) {
     final backup = File('${target.path}.bak');
     try {
-      if (backup.existsSync()) backup.deleteSync();
+      deleteSqliteFile(backup.path, strict: true);
       target.renameSync(backup.path);
       try {
+        // קובצי הלוואי זזים עם הקובץ שלהם, אחרת היו מוחלים על החדש.
+        moveSqliteSidecars(target.path, backup.path);
         staged.renameSync(target.path);
       } catch (_) {
-        // החדש לא נכנס — מחזירים את הישן למקומו.
-        backup.renameSync(target.path);
+        // החדש לא נכנס — מחזירים את הישן למקומו. שחזור שנכשל חייב לומר
+        // איפה הספרייה נמצאת, אחרת היא יושבת ב-`.bak` בלי שאיש יודע.
+        try {
+          backup.renameSync(target.path);
+          moveSqliteSidecars(backup.path, target.path);
+        } catch (restoreError) {
+          throw SubsetUpdateException(
+            'החלפת המסד נכשלה, וגם השחזור נכשל. המסד הקודם נמצא '
+            'ב-${backup.path} ואפשר לשנות את שמו בחזרה ל-${target.path}. '
+            'השגיאה: $restoreError',
+          );
+        }
         rethrow;
       }
-      backup.deleteSync();
+    } on SubsetUpdateException {
+      rethrow;
     } catch (e) {
       throw SubsetUpdateException('החלפת המסד נכשלה: $e');
     }
+    // מכאן ההחלפה **הצליחה** והמסד כבר בגרסה החדשה. כשל במחיקת הגיבוי
+    // שהיה נזרק כאן היה משאיר פרופיל בגרסה הישנה מול מסד בגרסה החדשה.
+    deleteSqliteFile(backup.path);
   }
 }

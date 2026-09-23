@@ -68,7 +68,10 @@ class HomeScreen extends StatelessWidget {
                       label: const Text('בחירת ספרים'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: checking ? null : onCheckUpdates,
+                      // לפני המחיקה הראשונה אין מה לעדכן כאן — הספרייה עדיין
+                      // של אוצריא, והיא מעדכנת אותה בעצמה.
+                      onPressed:
+                          checking || !state.hasSubset ? null : onCheckUpdates,
                       icon: const Icon(Icons.refresh_rounded),
                       label: const Text('בדיקת עדכונים'),
                     ),
@@ -166,11 +169,11 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 10),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
                   child: Text(
-                    'ספרים',
-                    style: TextStyle(
+                    books == 1 ? 'ספר' : 'ספרים',
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -291,8 +294,11 @@ class _PendingCard extends StatelessWidget {
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                  '$count ספרים שביקשת עדיין אינם כאן. הם יגיעו בפעם הבאה '
-                  'שהספרייה תיבנה מחדש.',
+                  count == 1
+                      ? 'ספר אחד שביקשת עדיין אינו כאן. הוא יגיע בפעם הבאה '
+                          'שהספרייה תיבנה מחדש.'
+                      : '${formatCount(count)} ספרים שביקשת עדיין אינם כאן. '
+                          'הם יגיעו בפעם הבאה שהספרייה תיבנה מחדש.',
                 ),
               ),
             ],

@@ -135,6 +135,22 @@ void main() {
       expect(reg.profileIdFor(identity('bbb', hostname: 'PC-2')), 'two');
     });
 
+    test('שינוי שם המחשב אינו מאבד את השיוך', () {
+      // זו כל הסיבה ל-GUID: ההתאמה לפיו נפלה בשקט לשם המחשב, ומחשב
+      // ששמו שונה קיבל פרופיל ריק חדש.
+      final reg = MachineRegistry(at('profiles'));
+      reg.bind(identity('aaa', hostname: 'PC-1'), 'one');
+      expect(reg.profileIdFor(identity('aaa', hostname: 'PC-NEW')), 'one');
+    });
+
+    test('מזהה מתמיד גובר על שם מחשב זהה של מחשב אחר', () {
+      final reg = MachineRegistry(at('profiles'));
+      reg.bind(identity('aaa', hostname: 'PC-1'), 'one');
+      reg.bind(identity('bbb', hostname: 'PC-1'), 'two');
+      expect(reg.profileIdFor(identity('bbb', hostname: 'PC-1')), 'two');
+      expect(reg.profileIdFor(identity('aaa', hostname: 'PC-1')), 'one');
+    });
+
     test('נפילה לשם המחשב כשהמזהה המתמיד נמחק', () {
       // מסלול ההתאוששות: %LOCALAPPDATA% נוקה, ה-GUID אבד. בלי הנפילה
       // הזו נוצר פרופיל כפול והמשתמש בונה מחדש ספרייה שכבר יש לו.
@@ -168,6 +184,28 @@ void main() {
           .whereType<File>()
           .where((f) => f.path.endsWith('.tmp'));
       expect(leftovers, isEmpty);
+    });
+
+    test('כשל ב-rename אינו מוחק את הרישום הקיים', () {
+      // אובדן הרישום פירושו פרופיל חדש וריק למחשב שכבר יש לו ספרייה.
+      final reg = MachineRegistry(at('profiles'));
+      reg.bind(identity('aaa'), 'one');
+      final tmp = File('${reg.file.path}.tmp')..writeAsStringSync('');
+      final handle = tmp.openSync(mode: FileMode.append);
+      try {
+        expect(() => reg.bind(identity('bbb', hostname: 'PC-2'), 'two'),
+            throwsA(anything));
+      } finally {
+        handle.closeSync();
+      }
+      expect(reg.profileIdFor(identity('aaa')), 'one');
+    }, skip: !Platform.isWindows);
+
+    test('רישום חסר משוחזר מ-.tmp שלם', () {
+      final reg = MachineRegistry(at('profiles'));
+      reg.bind(identity('aaa'), 'one');
+      reg.file.renameSync('${reg.file.path}.tmp');
+      expect(reg.profileIdFor(identity('aaa')), 'one');
     });
 
     test('ProfileStore מתעלם מקובץ הרישום באותה תיקייה', () {

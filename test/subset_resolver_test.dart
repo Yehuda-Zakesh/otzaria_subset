@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria_subset/otzaria_subset.dart';
 import 'package:path/path.dart' as p;
+import 'package:seforim_library_updater/seforim_library_updater.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import 'fixtures.dart';
@@ -345,7 +346,124 @@ void main() {
       final r = resolveWith((db) {});
       expect(r.keep, {1, 2});
       expect(r.pendingAcquisition, isEmpty);
-      expect(r.keepCategories, {1, 10});
+      // התת-קבוצה כאן נבנתה בלי גיזום עץ, ולכן 11 קיימת בה. המסנן אינו
+      // מוחק קטגוריות, והקבוצה חייבת לתאר את המסד שעל הדיסק (§4).
+      expect(r.keepCategories, {1, 10, 11});
+    });
+  });
+
+  /// שקילות עם עץ קטגוריות גזום ובחירה ברמת ספר — המקרה שבו
+  /// ‏keepCategories של ה-patch נבדל מהעץ שהמסד נבנה איתו.
+  group('שקילות עם עץ גזום', () {
+    String hashOf(String path) {
+      final db = sqlite3.sqlite3.open(path, mode: sqlite3.OpenMode.readOnly);
+      try {
+        return const SubsetHasher().compute(db, schemaVersion: 5);
+      } finally {
+        db.close();
+      }
+    }
+
+    DeltaManifest manifest() => const DeltaManifest(
+          fromVersion: 1,
+          toVersion: 2,
+          fromSchemaVersion: 5,
+          toSchemaVersion: 5,
+          patchFormatVersion: 4,
+          fromContentHash: 'x',
+          toContentHash: 'y',
+          patchFiles: [],
+        );
+
+    /// מחזיר את הפתירה ואת שני ה-hashes: אמת (החלה על המלא ואז גיזום)
+    /// מול מה שהתוכנה עושה (patch מסונן על התת-קבוצה).
+    ({PatchKeepResolution r, String viaFull, String viaFilter}) runBoth(
+      SubsetSpec spec,
+      void Function(sqlite3.Database db) mutate,
+    ) {
+      buildFullDb(at('full.db'), version: 1);
+      buildPatchDb(at('patch.db'),
+          fromVersion: 1, toVersion: 2, mutate: mutate);
+      final full = sqlite3.sqlite3.open(at('full.db'));
+      final Set<int> books;
+      final Set<int> cats;
+      try {
+        books = resolver.resolveBookIds(full, spec);
+        cats = resolver.resolveCategoryIds(full,
+            selectedCategoryIds: spec.categoryIds, bookIds: books);
+      } finally {
+        full.close();
+      }
+      const SubsetBuilder().build(
+        sourcePath: at('full.db'),
+        targetPath: at('b.db'),
+        bookIds: books,
+        keepCategoryIds: cats,
+      );
+      final sub = sqlite3.sqlite3.open(at('b.db'), uri: true);
+      final PatchKeepResolution r;
+      try {
+        r = resolver.resolveForPatch(sub, spec, at('patch.db'));
+      } finally {
+        sub.close();
+      }
+
+      File(at('full.db')).copySync(at('full2.db'));
+      const PatchApplier().apply(
+        dbPath: at('full2.db'),
+        patchPath: at('patch.db'),
+        manifest: manifest(),
+        verifyFromHash: false,
+        verifyToHash: false,
+      );
+      const SubsetBuilder().build(
+        sourcePath: at('full2.db'),
+        targetPath: at('a.db'),
+        bookIds: r.keep,
+        keepCategoryIds: r.keepCategories,
+      );
+
+      const PatchFilter().filter(
+        patchPath: at('patch.db'),
+        subsetPath: at('b.db'),
+        outputPath: at('filtered.db'),
+        bookIds: r.keep,
+        keepCategoryIds: r.keepCategories,
+      );
+      const PatchApplier().apply(
+        dbPath: at('b.db'),
+        patchPath: at('filtered.db'),
+        manifest: manifest(),
+        verifyFromHash: false,
+        verifyToHash: false,
+      );
+      return (r: r, viaFull: hashOf(at('a.db')), viaFilter: hashOf(at('b.db')));
+    }
+
+    test('ספר מפורש שעובר לקטגוריה שנגזמה ממתין להבאה, והשקילות נשמרת', () {
+      // ספר 1 נבחר לבדו; קטגוריה 11 נגזמה בבנייה. ה-patch מעביר אותו
+      // ל-11 בלי לשאת את שורת הקטגוריה, שאינה משתנה באפסטרים.
+      final out = runBoth(
+        const SubsetSpec(includeBookIds: {1}),
+        (db) =>
+            db.execute("INSERT INTO upsert_book VALUES (1, 11, 'ספר 1', 3)"),
+      );
+      expect(out.r.pendingAcquisition, {1},
+          reason: 'שורת הקטגוריה החדשה שלו אינה במסד ואינה ב-patch');
+      expect(out.viaFilter, out.viaFull);
+    });
+
+    test('קטגוריה מקומית שהתרוקנה נשארת בשני הצדדים', () {
+      // ספרים 1 (ב-10) ו-3 (ב-11) נבחרו; ספר 1 עובר ל-11 שכבר קיימת.
+      final out = runBoth(
+        const SubsetSpec(includeBookIds: {1, 3}),
+        (db) =>
+            db.execute("INSERT INTO upsert_book VALUES (1, 11, 'ספר 1', 3)"),
+      );
+      expect(out.r.keep, {1, 3});
+      expect(out.r.keepCategories, containsAll(<int>{1, 10, 11}),
+          reason: 'המסנן אינו מוחק קטגוריה מקומית, ולכן גם צד האמת שומר אותה');
+      expect(out.viaFilter, out.viaFull);
     });
   });
 }

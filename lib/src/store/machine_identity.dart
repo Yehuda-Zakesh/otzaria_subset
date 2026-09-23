@@ -137,8 +137,11 @@ class MachineRegistry {
   /// שני מחשבים בעלי אותו שם לאותה ספרייה.
   String? profileIdFor(MachineIdentity identity) {
     final map = _read();
+    // ‏bind שומר אובייקט, לא מחרוזת; בדיקת String בלבד פספסה תמיד, וההתאמה
+    // נפלה בשקט לשם המחשב — מחשב ששמו שונה קיבל פרופיל ריק.
     final byId = map[identity.id];
-    if (byId is String && byId.isNotEmpty) return byId;
+    final boundId = byId is Map ? byId['profileId'] : byId;
+    if (boundId is String && boundId.isNotEmpty) return boundId;
 
     for (final entry in map.entries) {
       final value = entry.value;
@@ -184,8 +187,11 @@ class MachineRegistry {
 
   Map<String, dynamic> _read() {
     try {
-      if (!file.existsSync()) return {};
-      final raw = jsonDecode(file.readAsStringSync());
+      // רישום חסר עם .tmp שלם — נפילה של גרסה קודמת בין מחיקה ל-rename.
+      // בלי זה המחשב היה מקבל פרופיל ריק חדש.
+      final source = file.existsSync() ? file : File('${file.path}.tmp');
+      if (!source.existsSync()) return {};
+      final raw = jsonDecode(source.readAsStringSync());
       return raw is Map<String, dynamic> ? raw : {};
     } catch (_) {
       // רישום פגום אינו סיבה לעצור: התוצאה היא פרופיל חדש, לא קריסה.
@@ -200,7 +206,8 @@ class MachineRegistry {
       const JsonEncoder.withIndent('  ').convert(map),
       flush: true,
     );
-    if (file.existsSync()) file.deleteSync();
+    // ‏rename דורס גם ב-Windows; מחיקה מקודם הייתה מאבדת את הרישום כשה-
+    // rename נכשל אחריה.
     tmp.renameSync(file.path);
   }
 }

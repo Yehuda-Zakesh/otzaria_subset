@@ -113,13 +113,22 @@ class AppUpdater {
       final sink = file.openWrite();
       var received = 0;
       try {
-        await for (final chunk in response.stream) {
+        // ה-timeout של `send` מכסה רק את הכותרות; חיבור שנתקע באמצע היה
+        // משאיר את פס ההורדה תקוע לנצח.
+        await for (final chunk
+            in response.stream.timeout(const Duration(seconds: 60))) {
           sink.add(chunk);
           received += chunk.length;
           if (total > 0) yield (received / total).clamp(0.0, 1.0);
         }
       } finally {
         await sink.close();
+      }
+      // קובץ חתוך אינו נושא את החתימה בסופו, והפורש היה מודיע "הקובץ
+      // פגום" אחרי שהתוכנה כבר נסגרה.
+      final expected = response.contentLength;
+      if (expected != null && received != expected) {
+        throw HttpException('ההורדה לא הושלמה', uri: release.downloadUrl);
       }
     } finally {
       client.close();

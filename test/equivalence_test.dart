@@ -325,6 +325,45 @@ void main() {
     expect(r.viaFilter, r.viaFull);
   });
 
+  test('שורה עוברת לספר שלא נבחר יחד עם הצאצאים שלה באותו patch', () {
+    // ההורה קיים מקומית ולכן הצאצא עובר את הסינון, אבל המחיקה המסונתזת
+    // של ההורה חייבת לסחוף אותו — אחרת נשאר צאצא יתום.
+    final r = runBothPaths((db) {
+      db.execute("INSERT INTO upsert_line VALUES (101, 3, 9, 'עבר', 4)");
+      db.execute('INSERT INTO upsert_line_toc VALUES (101, 1)');
+      db.execute("INSERT INTO upsert_version_line VALUES (1, 101, 'עבר')");
+      db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+    });
+    expect(r.viaFilter, r.viaFull);
+  });
+
+  test('קישור פנימי שהופך לחוצה-גבול, עם עוגן מעודכן באותו patch', () {
+    final r = runBothPaths((db) {
+      db.execute('INSERT INTO upsert_link VALUES (1, 1, 3, 100, 300)');
+      db.execute("INSERT INTO upsert_link_anchor VALUES (1, 0, 0, 9, 'x')");
+      db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+    });
+    expect(r.viaFilter, r.viaFull);
+  });
+
+  test('שורה קיימת בטבלת הורה שה-patch מפנה להורה שלא שרד', () {
+    // ‏line_toc.tocEntryId אינו חלק מה-PK: ה-upsert נופל בסינון, והשורה
+    // המקומית חייבת להימחק ולא להישאר עם ההפניה הישנה.
+    final r = runBothPaths((db) {
+      db.execute('INSERT INTO upsert_line_toc VALUES (100, 3)');
+      db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+    });
+    expect(r.viaFilter, r.viaFull);
+  });
+
+  test('שורה עוברת מספר שלא נבחר לספר שנבחר', () {
+    final r = runBothPaths((db) {
+      db.execute("INSERT INTO upsert_line VALUES (300, 1, 9, 'נכנס', 5)");
+      db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");
+    });
+    expect(r.viaFilter, r.viaFull);
+  });
+
   test('patch ריק אינו משנה דבר', () {
     final r = runBothPaths((db) {
       db.execute("INSERT INTO upsert_schema_meta VALUES ('db_version','2')");

@@ -38,6 +38,13 @@ class OtzariaUpdateSettings {
           softwareAndBookUpdatesEnabled == false ||
           autoSync == false);
 
+  /// כבוי רק הסינכרון האוטומטי: כפתור "עדכון ספרייה" הידני באוצריא עדיין
+  /// פעיל, ולחיצה עליו תחזיר את כל הספרים. לכן אזהרה, לא חסימה.
+  bool get manualUpdateStillAvailable =>
+      isDisabled &&
+      offlineMode != true &&
+      softwareAndBookUpdatesEnabled != false;
+
   /// ההסבר שמוצג למשתמש.
   ///
   /// בלי מונחים פנימיים: מה שהוא צריך לדעת הוא שהספרים שהשאיר עלולים

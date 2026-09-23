@@ -74,57 +74,63 @@ std::wstring TempFile(const wchar_t* name) {
 
 // ── המטען ─────────────────────────────────────────────────────────
 
-// מעתיק את המטען מסוף הקובץ שלנו לקובץ זמני, במנות. בלי החזקה של
-// המטען כולו בזיכרון — אין סיבה ש-stub של הפעלה יבקש מהמערכת עשרות
-// מגהבייטים.
-Footer CopyPayload(const std::wstring& self, const std::wstring& archive) {
+// הקובץ שלנו פתוח לקריאה, עם החתימה שבסופו ומיקום המטען.
+struct Self {
+  HANDLE file;
+  Footer footer;
+  LONGLONG payloadAt;
+};
+
+// קורא רק את החתימה. ההעתקה עצמה נפרדת, כדי שהפעלה רגילה (בלי פרישה)
+// לא תכתוב את כל המטען ל-TEMP בכל לחיצה.
+Self OpenSelf(const std::wstring& self) {
   const HANDLE source = CreateFileW(self.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (source == INVALID_HANDLE_VALUE) Fail(L"לא הצלחנו לקרוא את הקובץ.");
 
   LARGE_INTEGER size{};
-  GetFileSizeEx(source, &size);
-
   Footer footer{};
   LARGE_INTEGER at{};
-  at.QuadPart = size.QuadPart - static_cast<LONGLONG>(sizeof(footer));
   DWORD read = 0;
-  if (at.QuadPart <= 0 || !SetFilePointerEx(source, at, nullptr, FILE_BEGIN) ||
+  if (!GetFileSizeEx(source, &size) ||
+      (at.QuadPart = size.QuadPart - static_cast<LONGLONG>(sizeof(footer))) <= 0 ||
+      !SetFilePointerEx(source, at, nullptr, FILE_BEGIN) ||
       !ReadFile(source, &footer, sizeof(footer), &read, nullptr) || read != sizeof(footer) ||
-      memcmp(footer.magic, kMagic, sizeof(kMagic)) != 0) {
+      memcmp(footer.magic, kMagic, sizeof(kMagic)) != 0 ||
+      // השוואה ב-unsigned לפני החיסור: גודל ענק היה הופך לשלילי ב-cast.
+      footer.payloadSize > static_cast<uint64_t>(at.QuadPart)) {
     CloseHandle(source);
     Fail(kBroken);
   }
+  return {source, footer, at.QuadPart - static_cast<LONGLONG>(footer.payloadSize)};
+}
 
-  at.QuadPart -= static_cast<LONGLONG>(footer.payloadSize);
-  if (at.QuadPart < 0 || !SetFilePointerEx(source, at, nullptr, FILE_BEGIN)) {
-    CloseHandle(source);
-    Fail(kBroken);
-  }
+// מעתיק את המטען לקובץ זמני, במנות. בלי החזקה של המטען כולו בזיכרון —
+// אין סיבה ש-stub של הפעלה יבקש מהמערכת עשרות מגהבייטים.
+void CopyPayload(const Self& self, const std::wstring& archive) {
+  LARGE_INTEGER at{};
+  at.QuadPart = self.payloadAt;
+  if (!SetFilePointerEx(self.file, at, nullptr, FILE_BEGIN)) Fail(kBroken);
 
   const HANDLE target = CreateFileW(archive.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                     FILE_ATTRIBUTE_TEMPORARY, nullptr);
-  if (target == INVALID_HANDLE_VALUE) {
-    CloseHandle(source);
-    Fail(L"לא הצלחנו לכתוב לתיקייה הזמנית.");
-  }
+  if (target == INVALID_HANDLE_VALUE) Fail(L"לא הצלחנו לכתוב לתיקייה הזמנית.");
 
   static unsigned char buffer[1 << 20];
-  uint64_t left = footer.payloadSize;
+  uint64_t left = self.footer.payloadSize;
   while (left > 0) {
     const DWORD want = static_cast<DWORD>(left < sizeof(buffer) ? left : sizeof(buffer));
-    DWORD written = 0;
-    if (!ReadFile(source, buffer, want, &read, nullptr) || read == 0 ||
+    DWORD read = 0, written = 0;
+    if (!ReadFile(self.file, buffer, want, &read, nullptr) || read == 0 ||
         !WriteFile(target, buffer, read, &written, nullptr) || written != read) {
       CloseHandle(target);
-      CloseHandle(source);
+      // עותק חלקי של כמה מגהבייטים לא אמור להישאר ב-TEMP.
+      DeleteFileW(archive.c_str());
       Fail(kBroken);
     }
     left -= read;
   }
   CloseHandle(target);
-  CloseHandle(source);
-  return footer;
 }
 
 // ── גרסאות ────────────────────────────────────────────────────────
@@ -155,7 +161,12 @@ bool ParseVersion(const std::string& text, int out[3]) {
 // השוואה ולא אי-שוויון: אחרי עדכון עצמי התיקייה מחזיקה גרסה חדשה מזו
 // שב-EXE הישן שנשאר לידה. לחיצה עליו חייבת רק להפעיל, לא להחזיר את
 // המשתמש אחורה.
-bool ShouldDeploy(const std::wstring& stampPath, const std::string& version) {
+bool ShouldDeploy(const std::wstring& target, const std::wstring& stampPath,
+                  const std::string& version) {
+  // חותמת בלי התוכנה עצמה (המשתמש מחק קבצים) הייתה נתקעת על "לא הצלחנו
+  // להפעיל" לנצח.
+  const std::wstring exe = target + L"\\" + kAppExe;
+  if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) return true;
   const HANDLE file = CreateFileW(stampPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return true;
@@ -218,13 +229,18 @@ DWORD WaitPumping(HANDLE process, DWORD timeout) {
 
 // ── הרצה ──────────────────────────────────────────────────────────
 
+// ‏[input]: אם ניתן, הופך לקלט התקני של התהליך (וחייב להיות בר-ירושה).
 HANDLE Start(const std::wstring& exe, std::wstring command, const wchar_t* workingDir,
-             DWORD flags) {
+             DWORD flags, HANDLE input = nullptr) {
   STARTUPINFOW startup{};
   startup.cb = sizeof(startup);
+  if (input != nullptr) {
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input;
+  }
   PROCESS_INFORMATION process{};
-  if (!CreateProcessW(exe.c_str(), &command[0], nullptr, nullptr, FALSE, flags, nullptr, workingDir,
-                      &startup, &process)) {
+  if (!CreateProcessW(exe.c_str(), &command[0], nullptr, nullptr, input != nullptr, flags, nullptr,
+                      workingDir, &startup, &process)) {
     return nullptr;
   }
   CloseHandle(process.hThread);
@@ -232,21 +248,37 @@ HANDLE Start(const std::wstring& exe, std::wstring command, const wchar_t* worki
 }
 
 void Extract(const std::wstring& archive, const std::wstring& target) {
-  CreateDirectoryW(target.c_str(), nullptr);
+  if (!CreateDirectoryW(target.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+    DeleteFileW(archive.c_str());
+    Fail(L"לא הצלחנו ליצור את תיקיית התוכנה. ייתכן שאין הרשאת כתיבה למיקום הזה.");
+  }
   const std::wstring tar = SystemFile(L"tar.exe");
-  const std::wstring command =
-      L"\"" + tar + L"\" -xf \"" + archive + L"\" -C \"" + target + L"\"";
+
+  // אף נתיב לא עובר בשורת הפקודה: tar.exe של Windows ממיר את argv
+  // לקוד-פייג' ANSI, ונתיב עם תו מחוצה לו (שם משתמש, שם תיקייה) נכשל
+  // ב-"could not chdir". היעד הוא תיקיית העבודה, והמטען בא מ-stdin.
+  SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+  const HANDLE input = CreateFileW(archive.c_str(), GENERIC_READ, FILE_SHARE_READ, &inherit,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (input == INVALID_HANDLE_VALUE) Fail(kBroken);
 
   const HWND splash = ShowSplash();
-  const HANDLE process = Start(tar, command, target.c_str(), CREATE_NO_WINDOW);
-  if (process == nullptr) Fail(L"לא נמצא tar.exe במערכת. צריך Windows 10 ומעלה.");
-  WaitPumping(process, INFINITE);
+  const HANDLE process =
+      Start(tar, L"\"" + tar + L"\" -xf -", target.c_str(), CREATE_NO_WINDOW, input);
   DWORD code = 1;
-  GetExitCodeProcess(process, &code);
-  CloseHandle(process);
+  if (process != nullptr) {
+    WaitPumping(process, INFINITE);
+    GetExitCodeProcess(process, &code);
+    CloseHandle(process);
+  }
+  CloseHandle(input);
+  DeleteFileW(archive.c_str());
+  // לפני ה-Fail: החלון הוא TOPMOST וממורכז, והיה מסתיר את הודעת השגיאה.
   if (splash != nullptr) DestroyWindow(splash);
+  if (process == nullptr) Fail(L"לא נמצא tar.exe במערכת. צריך Windows 10 ומעלה.");
   if (code != 0)
-    Fail(L"פרישת הקבצים נכשלה. ייתכן שאין הרשאת כתיבה לתיקייה או שאין מספיק מקום פנוי.");
+    Fail(L"פרישת הקבצים נכשלה. ייתכן שהתוכנה עדיין פתוחה, שאין הרשאת כתיבה לתיקייה או שאין "
+         L"מספיק מקום פנוי.");
 }
 
 [[noreturn]] void LaunchAndExit(const std::wstring& target) {
@@ -286,27 +318,34 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   if (!update) target = DirName(self) + L"\\" + kFolder;
   const std::wstring stamp = target + L"\\" + kStamp;
 
-  const std::wstring archive = TempFile(L"otzaria-subset-payload.tar.xz");
-  const Footer footer = CopyPayload(self, archive);
-  const std::string version(footer.version,
-                            strnlen(footer.version, sizeof(footer.version)));
+  const Self payload = OpenSelf(self);
+  const std::string version(payload.footer.version,
+                            strnlen(payload.footer.version, sizeof(payload.footer.version)));
 
   if (update) {
     // בעדכון אין בדיקת גרסה: מי שהריץ אותנו כבר החליט, והוא זה שנסגר.
+    // ‏OpenProcess שנכשל פירושו שהתהליך כבר יצא — ממשיכים.
     if (waitFor != 0) {
       const HANDLE other = OpenProcess(SYNCHRONIZE, FALSE, waitFor);
       if (other != nullptr) {
-        WaitPumping(other, 30000);
+        const DWORD waited = WaitPumping(other, 30000);
         CloseHandle(other);
+        // פרישה מעל תוכנה שעדיין רצה נכשלת באמצע על DLL נעול ומשאירה
+        // תיקייה חצי מוחלפת. עדיף לעצור לפני שנגענו במשהו.
+        if (waited != WAIT_OBJECT_0)
+          Fail(L"התוכנה לא נסגרה, ולכן העדכון לא הותקן. אפשר לסגור אותה ולנסות שוב.");
       }
     }
-  } else if (!ShouldDeploy(stamp, version)) {
-    DeleteFileW(archive.c_str());
+  } else if (!ShouldDeploy(target, stamp, version)) {
     LaunchAndExit(target);
   }
 
+  const std::wstring archive = TempFile(L"otzaria-subset-payload.tar.xz");
+  CopyPayload(payload, archive);
+  // החותמת נמחקת לפני הפרישה: אם tar ייכשל באמצע, החותמת הישנה הייתה
+  // גורמת ללחיצה הבאה להפעיל תיקייה חצי מוחלפת במקום לפרוש שוב.
+  DeleteFileW(stamp.c_str());
   Extract(archive, target);
-  DeleteFileW(archive.c_str());
   WriteStamp(stamp, version);
   LaunchAndExit(target);
 }

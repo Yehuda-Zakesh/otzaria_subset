@@ -18,15 +18,30 @@
 /// ביצירת מסד ריק חדש — כלומר שקט, לא רועש. ראו `SubsetBuilder`.
 library;
 
+import 'dart:io';
+
 /// ‏URI לקריאה בלבד עבור [path].
 ///
 /// ‏`Uri.file` מטפל בהמרה לנתיב URI חוקי, כולל קידוד רווחים (`%20`) —
 /// שהוא המקרה הרגיל כאן, כי הנתיב עובר דרך תיקיית המשתמש בווינדוס.
-String readOnlyUri(String path) => '${Uri.file(path)}?mode=ro';
+String readOnlyUri(String path) => '${_fileUri(path)}?mode=ro';
 
 /// ‏URI immutable — לקריאה בלבד **וללא** יצירת קובצי `-wal`/`-shm`.
 ///
 /// מתאים לכונן מוגן-כתיבה או ל-CD: SQLite מבטיח לא לגעת בקובץ כלל.
 /// **אין להשתמש בו על מסד שתהליך אחר עשוי לכתוב אליו במקביל** — SQLite
 /// מדלג אז על בדיקות שינוי ויקרא נתונים לא עקביים.
-String immutableUri(String path) => '${Uri.file(path)}?immutable=1';
+String immutableUri(String path) => '${_fileUri(path)}?immutable=1';
+
+String _fileUri(String path) {
+  // נתיב יחסי היה יוצא בלי `file:`, ו-SQLite היה מפרש אותו כשם קובץ
+  // מילולי שכולל את `?mode=ro` — בלי הגנת הקריאה-בלבד.
+  final uri = Uri.file(File(path).absolute.path);
+  // ‏UNC (`\\server\share`) יוצא כ-`file://server/...`; SQLite דוחה authority
+  // שאינו `localhost`, ואת `localhost` הוא בולע ופותח נתיב מקומי שגוי.
+  // authority ריק עם `//server` בתחילת הנתיב הוא הצורה שהוא פותח נכון.
+  if (uri.host.isNotEmpty) {
+    return 'file://${uri.toString().substring('file:'.length)}';
+  }
+  return uri.toString();
+}

@@ -96,15 +96,21 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
   StreamSubscription<double>? _download;
   double? _progress;
 
+  /// הדיאלוג נסגר פעם אחת בלבד. זרם שנכשל שולח שגיאה **ואז** סיום, וה-State
+  /// עדיין mounted בזמן אנימציית הסגירה — pop שני היה סוגר את המסך שמתחת.
+  var _closed = false;
+
   @override
   void initState() {
     super.initState();
     // כל סיום של ההזרמה הוא כשל — ראו AppUpdater.install.
     _download = const AppUpdater().install(widget.release).listen(
-          (value) => setState(() => _progress = value),
-          onError: (Object _) => _fail(),
-          onDone: _fail,
-        );
+      (value) {
+        if (!_closed && mounted) setState(() => _progress = value);
+      },
+      onError: (Object _) => _close(true),
+      onDone: () => _close(true),
+    );
   }
 
   @override
@@ -113,8 +119,11 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
     super.dispose();
   }
 
-  void _fail() {
-    if (mounted) Navigator.of(context).pop(true);
+  void _close(bool failed) {
+    if (_closed || !mounted) return;
+    _closed = true;
+    unawaited(_download?.cancel());
+    Navigator.of(context).pop(failed);
   }
 
   @override
@@ -142,7 +151,7 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
         // פס התקדמות קפוא בלי שום דרך לסגור אותו.
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => _close(false),
             child: const Text('ביטול'),
           ),
         ],

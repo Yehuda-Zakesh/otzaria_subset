@@ -115,8 +115,8 @@ class SubsetBuilder {
       // דורש `VACUUM` מלא. זה מה שמאפשר להסרה הבאה למחוק שורות במקום
       // ולשחרר את הדף לדיסק בלי לכתוב את כל המסד מחדש; ראו `SubsetPruner`.
       db.execute('PRAGMA auto_vacuum = INCREMENTAL');
-      db.execute('PRAGMA journal_mode = OFF');
-      db.execute('PRAGMA synchronous = OFF');
+      db.execute('PRAGMA main.journal_mode = OFF');
+      db.execute('PRAGMA main.synchronous = OFF');
       db.execute('PRAGMA foreign_keys = OFF');
       // ‏מטמון של 256MB במקום 2MB כברירת מחדל. בניית האינדקסים בסוף
       // ממיינת מיליוני שורות, ומטמון קטן שולח כל מיון לדיסק — זה ההפרש

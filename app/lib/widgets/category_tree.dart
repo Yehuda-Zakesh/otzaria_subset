@@ -32,7 +32,32 @@ class CategoryTree extends StatefulWidget {
 
 class _CategoryTreeState extends State<CategoryTree> {
   final Set<int> _expanded = {};
+
+  /// קטגוריות שהמשתמש סגר בזמן חיפוש. בלי זה קטגוריה שנפתחה מאליה
+  /// בחיפוש לא הייתה ניתנת לסגירה.
+  final Set<int> _collapsed = {};
   String _query = '';
+
+  // המצב הנגזר מחושב פעם אחת לכל בחירה ולא לכל שורה: חישוב לכל שורה
+  // עובר על כל תת-העץ שלה, ועל אלפי ספרים זה ריבועי בכל בנייה.
+  TreeMarks? _marks;
+  final Map<int, bool> _matchCache = {};
+
+  TreeMarks get _derived {
+    final cached = _marks;
+    if (cached != null &&
+        identical(cached.catalog, widget.catalog) &&
+        identical(cached.removal, widget.removal)) {
+      return cached;
+    }
+    return _marks = TreeMarks(widget.catalog, widget.removal);
+  }
+
+  @override
+  void didUpdateWidget(CategoryTree oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.catalog, widget.catalog)) _matchCache.clear();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +74,11 @@ class _CategoryTreeState extends State<CategoryTree> {
               hintText: 'חיפוש ספר או קטגוריה',
               isDense: true,
             ),
-            onChanged: (value) => setState(() => _query = value.trim()),
+            onChanged: (value) => setState(() {
+              _query = value.trim();
+              _matchCache.clear();
+              _collapsed.clear();
+            }),
           ),
         ),
         Expanded(
@@ -64,14 +93,16 @@ class _CategoryTreeState extends State<CategoryTree> {
                         color: Theme.of(context).colorScheme.outline,
                       ),
                       const SizedBox(height: 8),
-                      const Text('אין תוצאות'),
+                      // ספרייה ריקה אינה "אין תוצאות" — לא חיפשו כלום.
+                      Text(_query.isEmpty ? 'אין ספרים בספרייה' : 'אין תוצאות'),
                     ],
                   ),
                 )
               : ListView(
                   padding: const EdgeInsets.only(bottom: 24),
                   children: [
-                    for (final root in roots) ..._rows(root, 0),
+                    for (final root in roots)
+                      ..._rows(root, 0, filtering: _query.isNotEmpty),
                   ],
                 ),
         ),
@@ -84,159 +115,232 @@ class _CategoryTreeState extends State<CategoryTree> {
   List<CatalogCategory> _visibleRoots() =>
       widget.catalog.roots.where((c) => _query.isEmpty || _matches(c)).toList();
 
+  /// זיכרון לכל חיפוש: בלעדיו כל שורה סורקת שוב את כל תת-העץ שלה.
   bool _matches(CatalogCategory category) {
     if (_query.isEmpty) return true;
-    if (category.title.contains(_query)) return true;
-    for (final child in widget.catalog.childrenOf[category.id] ??
-        const <CatalogCategory>[]) {
-      if (_matches(child)) return true;
+    final cached = _matchCache[category.id];
+    if (cached != null) return cached;
+    var result = category.title.contains(_query);
+    if (!result) {
+      for (final child in widget.catalog.childrenOf[category.id] ??
+          const <CatalogCategory>[]) {
+        if (_matches(child)) {
+          result = true;
+          break;
+        }
+      }
     }
-    for (final book
-        in widget.catalog.booksOf[category.id] ?? const <CatalogBook>[]) {
-      if (book.title.contains(_query)) return true;
+    if (!result) {
+      for (final book
+          in widget.catalog.booksOf[category.id] ?? const <CatalogBook>[]) {
+        if (book.title.contains(_query)) {
+          result = true;
+          break;
+        }
+      }
     }
-    return false;
+    return _matchCache[category.id] = result;
   }
 
-  List<Widget> _rows(CatalogCategory category, int depth) {
+  /// [filtering] נכבה מתחת לקטגוריה ששמה עצמו תאם: מי שחיפש אותה רוצה
+  /// לראות את מה שבתוכה, לא קטגוריה פתוחה וריקה.
+  List<Widget> _rows(
+    CatalogCategory category,
+    int depth, {
+    required bool filtering,
+  }) {
     final children =
         widget.catalog.childrenOf[category.id] ?? const <CatalogCategory>[];
     final books = widget.catalog.booksOf[category.id] ?? const <CatalogBook>[];
-    final open = _expanded.contains(category.id) ||
-        (_query.isNotEmpty && _matches(category));
-    final state = _stateOf(category);
+    final autoOpen = filtering && _matches(category);
+    final open = !_collapsed.contains(category.id) &&
+        (_expanded.contains(category.id) || autoOpen);
+    final filterBelow = filtering && !category.title.contains(_query);
+    final marks = _derived;
+    final state = marks.stateOf(category.id);
 
     return [
       _CategoryRow(
+        key: ValueKey('c${category.id}'),
         category: category,
         depth: depth,
         state: state,
         open: open,
         hasChildren: children.isNotEmpty || books.isNotEmpty,
-        bookCount: widget.catalog.booksUnder(category.id).length,
+        bookCount: marks.total[category.id] ?? 0,
         onToggleOpen: () => setState(() {
-          if (!_expanded.remove(category.id)) _expanded.add(category.id);
+          if (open) {
+            _expanded.remove(category.id);
+            if (autoOpen) _collapsed.add(category.id);
+          } else {
+            _collapsed.remove(category.id);
+            _expanded.add(category.id);
+          }
         }),
         onToggleChecked: () => _toggleCategory(category, state),
       ),
       if (open) ...[
         for (final child in children)
-          if (_query.isEmpty || _matches(child)) ..._rows(child, depth + 1),
+          if (!filterBelow || _matches(child))
+            ..._rows(child, depth + 1, filtering: filterBelow),
         for (final book in books)
-          if (_query.isEmpty || book.title.contains(_query))
+          if (!filterBelow || book.title.contains(_query))
             _BookRow(
+              key: ValueKey('b${book.id}'),
               book: book,
               depth: depth + 1,
-              checked: _marked(book),
+              checked: marks.isMarked(book),
               onToggle: () => _toggleBook(book),
             ),
       ],
     ];
   }
 
-  // ── מצב נגזר ──────────────────────────────────────────────────────
-
-  TriState _stateOf(CatalogCategory category) {
-    if (widget.removal.categoryIds.contains(category.id)) return TriState.all;
-    final books = widget.catalog.booksUnder(category.id);
-    if (books.isEmpty) return TriState.none;
-    var marked = 0;
-    for (final book in books) {
-      if (_marked(book)) marked++;
-    }
-    if (marked == 0) return TriState.none;
-    return marked == books.length ? TriState.all : TriState.partial;
-  }
-
-  bool _marked(CatalogBook book) =>
-      widget.removal.bookIds.contains(book.id) ||
-      _markedAncestor(book.categoryId);
-
-  bool _markedAncestor(int categoryId) {
-    var current = categoryId;
-    final seen = <int>{};
-    while (seen.add(current)) {
-      if (widget.removal.categoryIds.contains(current)) return true;
-      final parent = widget.catalog.parentOf[current];
-      if (parent == null) return false;
-      current = parent;
-    }
-    return false;
-  }
-
   // ── שינוי הסימון ──────────────────────────────────────────────────
 
   void _toggleCategory(CatalogCategory category, TriState state) {
-    final categories = widget.removal.categoryIds.toSet();
-    final books = widget.removal.bookIds.toSet();
-    final descendants = widget.catalog.descendantsOf(category.id);
-    final bookIds =
-        widget.catalog.booksUnder(category.id).map((b) => b.id).toSet();
-
-    // בשני הכיוונים מנקים קודם את כל מה שבתוך הענף: הסימון נשמר מצומצם,
-    // ובלעדיו סימון של אב היה משאיר מתחתיו סימונים שסותרים אותו.
-    categories.removeAll(descendants);
-    books.removeAll(bookIds);
-    if (state != TriState.all) {
-      categories.add(category.id);
-    } else {
-      _unmarkAncestorsOf(category.id, categories, books);
-    }
-
     widget.onChanged(
-      RemovalSelection(categoryIds: categories, bookIds: books),
+      toggleCategory(widget.catalog, widget.removal, category.id, state),
     );
   }
 
   void _toggleBook(CatalogBook book) {
-    final categories = widget.removal.categoryIds.toSet();
-    final books = widget.removal.bookIds.toSet();
+    widget.onChanged(toggleBook(widget.catalog, widget.removal, book));
+  }
+}
 
-    if (_marked(book)) {
-      _unmarkAncestorsOf(book.categoryId, categories, books);
-      books.remove(book.id);
-    } else {
-      books.add(book.id);
+/// מצב הסימון של כל העץ, בחישוב אחד מלמטה למעלה.
+class TreeMarks {
+  final LibraryCatalog catalog;
+  final RemovalSelection removal;
+
+  /// ספרים תחת כל קטגוריה, בכל עומק.
+  final Map<int, int> total = {};
+
+  /// מתוכם — כמה מסומנים למחיקה.
+  final Map<int, int> marked = {};
+
+  /// קטגוריות שהן עצמן או אחד מאבותיהן סומנו.
+  final Set<int> covered = {};
+
+  TreeMarks(this.catalog, this.removal) {
+    for (final root in catalog.roots) {
+      _walk(root.id, false);
     }
-
-    widget.onChanged(
-      RemovalSelection(categoryIds: categories, bookIds: books),
-    );
   }
 
-  /// מבטל סימון של אב שמכסה את [categoryId], בלי לבטל את אחיו.
-  ///
-  /// ‏[RemovalSelection] אינו יודע לומר "הענף הזה חוץ מהספר הזה", ולכן
-  /// הסימון של האב נפרס כלפי מטה: ילדיו מסומנים כל אחד לחוד, וכך אפשר
-  /// להוציא צומת אחד מבלי להחזיר את כל הענף.
-  void _unmarkAncestorsOf(
-    int categoryId,
-    Set<int> categories,
-    Set<int> books,
-  ) {
-    final path = <int>[];
-    var current = categoryId;
-    final seen = <int>{};
-    while (seen.add(current)) {
-      path.add(current);
-      if (categories.contains(current)) break;
-      final parent = widget.catalog.parentOf[current];
-      if (parent == null) return;
-      current = parent;
+  void _walk(int id, bool coveredAbove) {
+    final isCovered = coveredAbove || removal.categoryIds.contains(id);
+    if (isCovered) covered.add(id);
+    var all = 0;
+    var on = 0;
+    for (final book in catalog.booksOf[id] ?? const <CatalogBook>[]) {
+      all++;
+      if (isCovered || removal.bookIds.contains(book.id)) on++;
     }
-    if (path.isEmpty || !categories.contains(path.last)) return;
+    for (final child in catalog.childrenOf[id] ?? const <CatalogCategory>[]) {
+      _walk(child.id, isCovered);
+      all += total[child.id] ?? 0;
+      on += marked[child.id] ?? 0;
+    }
+    total[id] = all;
+    marked[id] = on;
+  }
 
-    for (var i = path.length - 1; i >= 0; i--) {
-      final id = path[i];
-      if (!categories.remove(id)) continue;
-      // האח שאינו על המסלול נשאר מסומן, ולכן הוא עובר לסימון משלו.
-      for (final child
-          in widget.catalog.childrenOf[id] ?? const <CatalogCategory>[]) {
-        if (child.id != (i > 0 ? path[i - 1] : -1)) categories.add(child.id);
-      }
-      for (final book in widget.catalog.booksOf[id] ?? const <CatalogBook>[]) {
-        books.add(book.id);
-      }
+  bool isMarked(CatalogBook book) =>
+      removal.bookIds.contains(book.id) || covered.contains(book.categoryId);
+
+  /// קטגוריה מכוסה מסומנת גם כשאין בה ספרים — אחרת תת-קטגוריה ריקה
+  /// תחת אב מסומן הייתה נראית לא מסומנת.
+  TriState stateOf(int id) {
+    if (covered.contains(id)) return TriState.all;
+    final all = total[id] ?? 0;
+    final on = marked[id] ?? 0;
+    if (all == 0 || on == 0) return TriState.none;
+    return on == all ? TriState.all : TriState.partial;
+  }
+}
+
+/// הבחירה אחרי לחיצה על קטגוריה שמצבה [state].
+///
+/// בשני הכיוונים מנקים קודם את כל מה שבתוך הענף: הסימון נשמר מצומצם,
+/// ובלעדיו סימון של אב היה משאיר מתחתיו סימונים שסותרים אותו.
+RemovalSelection toggleCategory(
+  LibraryCatalog catalog,
+  RemovalSelection removal,
+  int categoryId,
+  TriState state,
+) {
+  final categories = removal.categoryIds.toSet()
+    ..removeAll(catalog.descendantsOf(categoryId));
+  final books = removal.bookIds.toSet()
+    ..removeAll(catalog.booksUnder(categoryId).map((b) => b.id));
+  if (state != TriState.all) {
+    categories.add(categoryId);
+  } else {
+    _unmarkCovering(catalog, categoryId, categories, books, expandStart: false);
+  }
+  return RemovalSelection(categoryIds: categories, bookIds: books);
+}
+
+/// הבחירה אחרי לחיצה על ספר.
+RemovalSelection toggleBook(
+  LibraryCatalog catalog,
+  RemovalSelection removal,
+  CatalogBook book,
+) {
+  final categories = removal.categoryIds.toSet();
+  final books = removal.bookIds.toSet();
+  if (TreeMarks(catalog, removal).isMarked(book)) {
+    _unmarkCovering(
+      catalog,
+      book.categoryId,
+      categories,
+      books,
+      expandStart: true,
+    );
+    books.remove(book.id);
+  } else {
+    books.add(book.id);
+  }
+  return RemovalSelection(categoryIds: categories, bookIds: books);
+}
+
+/// מבטל סימון של אב שמכסה את [categoryId], בלי לבטל את אחיו.
+///
+/// ‏[RemovalSelection] אינו יודע לומר "הענף הזה חוץ מהספר הזה", ולכן
+/// הסימון של האב נפרס כלפי מטה לאורך **כל** המסלול — בכל רמה, ולא רק
+/// בעליונה: האחים שמחוץ למסלול והספרים הישירים מסומנים לחוד.
+/// [expandStart] קובע אם גם [categoryId] עצמה נפרסת — כן כשמוציאים
+/// ממנה ספר אחד, לא כשמוציאים אותה כולה.
+void _unmarkCovering(
+  LibraryCatalog catalog,
+  int categoryId,
+  Set<int> categories,
+  Set<int> books, {
+  required bool expandStart,
+}) {
+  final path = <int>[];
+  var current = categoryId;
+  final seen = <int>{};
+  while (seen.add(current)) {
+    path.add(current);
+    if (categories.contains(current)) break;
+    final parent = catalog.parentOf[current];
+    if (parent == null) return;
+    current = parent;
+  }
+  if (!categories.remove(path.last)) return;
+
+  for (var i = path.length - 1; i >= 0; i--) {
+    if (i == 0 && !expandStart) break;
+    final id = path[i];
+    final onPath = i > 0 ? path[i - 1] : null;
+    for (final child in catalog.childrenOf[id] ?? const <CatalogCategory>[]) {
+      if (child.id != onPath) categories.add(child.id);
+    }
+    for (final book in catalog.booksOf[id] ?? const <CatalogBook>[]) {
+      books.add(book.id);
     }
   }
 }
@@ -252,6 +356,7 @@ class _CategoryRow extends StatelessWidget {
   final VoidCallback onToggleChecked;
 
   const _CategoryRow({
+    super.key,
     required this.category,
     required this.depth,
     required this.state,
@@ -316,7 +421,10 @@ class _CategoryRow extends StatelessWidget {
                   ),
                 ),
                 if (bookCount > 0)
-                  _CountChip(text: '${formatCount(bookCount)} ספרים'),
+                  _CountChip(
+                    text: formatQuantity(bookCount,
+                        one: 'ספר אחד', many: 'ספרים'),
+                  ),
               ],
             ),
           ),
@@ -360,6 +468,7 @@ class _BookRow extends StatelessWidget {
   final VoidCallback onToggle;
 
   const _BookRow({
+    super.key,
     required this.book,
     required this.depth,
     required this.checked,
@@ -392,7 +501,8 @@ class _BookRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${formatCount(book.totalLines)} שורות',
+                  formatQuantity(book.totalLines,
+                      one: 'שורה אחת', many: 'שורות'),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),

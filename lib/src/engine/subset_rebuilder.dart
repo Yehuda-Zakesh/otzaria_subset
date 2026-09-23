@@ -112,8 +112,21 @@ class SubsetRebuilder {
       target.parent.path,
       'rebuild-${DateTime.now().microsecondsSinceEpoch}.staging.db',
     ));
+    // גיזום במקום (§11): כאן "המסד המלא" הוא היעד, ומחיקתו בסוף הייתה
+    // מוחקת את התוצאה. נקבע לפני ה-swap, כשהנתיבים עוד מצביעים לאותו קובץ.
+    final inPlace = _sameFile(fullDbPath, targetPath);
 
     try {
+      // ‏WAL או journal חם של היעד חייבים להתקפל לתוכו עכשיו: אחרי ההחלפה
+      // SQLite היה משייך אותם לקובץ החדש לפי השם ומלביש עליו דפים ישנים.
+      try {
+        settleSqliteSidecars(targetPath);
+      } catch (e) {
+        throw SubsetRebuildException(
+          'הספרייה הקיימת אינה במצב עקבי ואי אפשר להחליף אותה: $e',
+        );
+      }
+
       onStage?.call('resolve');
       final resolved = _resolve(fullDbPath, spec);
       if (resolved.bookIds.isEmpty) {
@@ -155,19 +168,21 @@ class SubsetRebuilder {
       if (indexDir != null) {
         onStage?.call('invalidateIndex');
         try {
-          invalidation = indexInvalidator.invalidate(indexDir);
+          // הגדרת אינדקס שגויה שמצביעה על תיקיית הספרייה הייתה מוחקת
+          // את הספרייה שזה עתה נבנתה.
+          invalidation = indexInvalidator.invalidate(
+            indexDir,
+            protectedPaths: [targetPath, fullDbPath],
+          );
         } on IndexInvalidationException {
           invalidation = null;
         }
       }
 
-      if (deleteFullDbWhenDone) {
+      if (deleteFullDbWhenDone && !inPlace) {
         onStage?.call('cleanup');
-        try {
-          full.deleteSync();
-        } catch (_) {
-          // מסד מלא שנשאר הוא בזבוז מקום, לא שגיאת נכונות.
-        }
+        // מסד מלא שנשאר הוא בזבוז מקום, לא שגיאת נכונות.
+        deleteSqliteFile(full.path);
       }
 
       return SubsetRebuildResult(
@@ -180,9 +195,7 @@ class SubsetRebuilder {
         indexInvalidation: invalidation,
       );
     } finally {
-      try {
-        if (staged.existsSync()) staged.deleteSync();
-      } catch (_) {}
+      deleteSqliteFile(staged.path);
     }
   }
 
@@ -207,7 +220,12 @@ class SubsetRebuilder {
     final db =
         sqlite3.sqlite3.open(fullDbPath, mode: sqlite3.OpenMode.readOnly);
     try {
-      final books = resolver.resolveBookIds(db, spec);
+      // מזהה מפורש שאינו במסד המלא אינו ספר. בלי הסינון בחירה כזו עוברת
+      // את בדיקת הבחירה הריקה ומחליפה את הספרייה בספרייה בלי ספרים.
+      final existing = {
+        for (final row in db.select('SELECT id FROM book')) row['id'] as int,
+      };
+      final books = resolver.resolveBookIds(db, spec).intersection(existing);
       return (
         bookIds: books,
         categoryIds: resolver.resolveCategoryIds(
@@ -238,10 +256,13 @@ class SubsetRebuilder {
   void _swap(File staged, File target) {
     final backup = File('${target.path}.bak');
     try {
-      if (backup.existsSync()) backup.deleteSync();
+      deleteSqliteFile(backup.path, strict: true);
       final hadTarget = target.existsSync();
       if (hadTarget) target.renameSync(backup.path);
       try {
+        // קובצי הלוואי זזים עם הקובץ שלהם: שם שנשאר ליד היעד היה מוחל
+        // על הקובץ החדש.
+        moveSqliteSidecars(target.path, backup.path);
         staged.renameSync(target.path);
       } catch (_) {
         // שחזור שנכשל בעצמו אינו רשאי להסתיר את הסיבה המקורית: בלעדיה
@@ -250,6 +271,7 @@ class SubsetRebuilder {
         if (hadTarget) {
           try {
             backup.renameSync(target.path);
+            moveSqliteSidecars(backup.path, target.path);
           } catch (restoreError) {
             throw SubsetRebuildException(
               'החלפת הספרייה נכשלה, וגם השחזור נכשל. הספרייה הקודמת '
@@ -262,15 +284,88 @@ class SubsetRebuilder {
       }
       // מכאן ואילך ההחלפה **הצליחה**. מחיקת הגיבוי היא ניקיון בלבד,
       // וכשל שלה אינו הופך בנייה מוצלחת לכישלון — הוא רק משאיר קובץ.
-      if (hadTarget) {
-        try {
-          backup.deleteSync();
-        } catch (_) {}
-      }
+      deleteSqliteFile(backup.path);
     } on SubsetRebuildException {
       rethrow;
     } catch (e) {
       throw SubsetRebuildException('החלפת הספרייה נכשלה: $e');
+    }
+  }
+
+  /// האם שני הנתיבים הם אותו קובץ — כולל הבדלי רישיות וצורת כתיבה.
+  static bool _sameFile(String a, String b) {
+    if (p.equals(p.canonicalize(a), p.canonicalize(b))) return true;
+    try {
+      return p.equals(
+        p.canonicalize(File(a).resolveSymbolicLinksSync()),
+        p.canonicalize(File(b).resolveSymbolicLinksSync()),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+/// הסיומות שבהן SQLite מחזיק מצב של מסד מחוץ לקובץ הראשי. הן משויכות
+/// לקובץ **לפי השם בלבד**, ולכן כל שינוי שם או מחיקה חייב לכלול אותן.
+const List<String> kSqliteSidecarSuffixes = ['-wal', '-shm', '-journal'];
+
+/// מביא את [path] למצב שבו כל תוכנו בקובץ עצמו, כדי שאפשר יהיה להעתיק
+/// או להחליף אותו לבד: WAL או journal חם מקופלים לתוכו, ומצב WAL מוחזר
+/// ל-rollback journal. קובץ שכבר במצב כזה אינו נפתח כלל.
+void settleSqliteSidecars(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return;
+  final hot =
+      File('$path-wal').existsSync() || File('$path-journal').existsSync();
+  if (!hot && !_isWalMode(file)) return;
+  final db = sqlite3.sqlite3.open(path);
+  try {
+    // הקריאה הראשונה מגלגלת journal חם או משחזרת WAL; היציאה ממצב WAL
+    // מקפלת אותו לקובץ ומוחקת אותו. מסד במצב WAL אינו קובץ אחד — וגם
+    // נכשל ב-`PRAGMA journal_mode = OFF` כשהוא מחובר לקריאה בלבד.
+    db.select('SELECT count(*) FROM sqlite_master');
+    db.select('PRAGMA journal_mode = DELETE');
+  } finally {
+    db.close();
+  }
+}
+
+/// בתים 18–19 בכותרת: 2 = WAL. נקרא בלי לפתוח חיבור.
+bool _isWalMode(File file) {
+  try {
+    final raf = file.openSync();
+    try {
+      final header = raf.readSync(20);
+      return header.length == 20 && (header[18] == 2 || header[19] == 2);
+    } finally {
+      raf.closeSync();
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+/// מעביר את קובצי הלוואי של [from] לשמות של [to].
+void moveSqliteSidecars(String from, String to) {
+  for (final suffix in kSqliteSidecarSuffixes) {
+    final f = File('$from$suffix');
+    if (f.existsSync()) f.renameSync('$to$suffix');
+  }
+}
+
+/// מוחק את [path] ואת קובצי הלוואי שלו. [strict] זורק כשמחיקה נכשלה —
+/// לשימוש לפני שכותבים לאותו שם; אחרת זה ניקיון בלבד.
+void deleteSqliteFile(String path, {bool strict = false}) {
+  for (final name in [
+    path,
+    for (final s in kSqliteSidecarSuffixes) '$path$s'
+  ]) {
+    try {
+      final f = File(name);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {
+      if (strict) rethrow;
     }
   }
 }

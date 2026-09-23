@@ -142,4 +142,30 @@ void main() {
       expect(disabled, isNot(equals(enabled)));
     });
   });
+
+  group('manualUpdateStillAvailable', () {
+    // רק כשכבוי הסינכרון האוטומטי לבדו — הכפתור הידני באוצריא עדיין פעיל.
+    for (final offline in [false, true]) {
+      for (final sw in [false, true]) {
+        for (final auto in [false, true]) {
+          final expected = !auto && !offline && sw;
+          test('offline=$offline sw=$sw autoSync=$auto -> $expected', () {
+            final s = guard.fromValues(
+              source: 's',
+              values: {
+                OtzariaUpdateGuard.keyOfflineMode: offline,
+                OtzariaUpdateGuard.keySoftwareAndBookUpdates: sw,
+                OtzariaUpdateGuard.keyAutoSync: auto,
+              },
+            );
+            expect(s.manualUpdateStillAvailable, expected);
+          });
+        }
+      }
+    }
+
+    test('הגדרות שלא נמצאו אינן מסומנות', () {
+      expect(guard.unknown('x').manualUpdateStillAvailable, isFalse);
+    });
+  });
 }

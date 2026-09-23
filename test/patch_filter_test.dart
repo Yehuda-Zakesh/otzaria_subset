@@ -279,5 +279,22 @@ void main() {
       });
       expect(r.totalSynthesizedDeletes, 0);
     });
+
+    test('שורת line_toc קיימת שמופנית להורה שלא שרד מקבלת מחיקה מסונתזת', () {
+      // ‏tocEntryId אינו ב-PK: ה-upsert נופל, ובלי מחיקה השורה המקומית
+      // נשארת עם ההפניה הישנה.
+      final r = run((db) {
+        db.execute('INSERT INTO upsert_line_toc VALUES (100, 3)');
+        // שורה 101 מקומית עם הורה ששרד — נשמרת ואינה נמחקת.
+        db.execute('INSERT INTO upsert_line_toc VALUES (101, 2)');
+        // שורה 300 אינה מקומית — אין מה למחוק.
+        db.execute('INSERT INTO upsert_line_toc VALUES (300, 3)');
+      });
+      expect(r.synthesizedDeletes['delete_line_toc'], 1);
+      onOut((db) {
+        expect(colOf(db, 'delete_line_toc', 'lineId'), {100});
+        expect(colOf(db, 'upsert_line_toc', 'lineId'), {101});
+      });
+    });
   });
 }

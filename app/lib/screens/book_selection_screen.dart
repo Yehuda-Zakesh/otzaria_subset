@@ -5,6 +5,7 @@ import 'package:otzaria_subset/otzaria_subset.dart';
 
 import '../jobs/jobs.dart';
 import '../main.dart';
+import '../services/error_report.dart';
 import '../theme.dart';
 import '../widgets/category_tree.dart';
 import '../widgets/format.dart';
@@ -40,12 +41,19 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
   Timer? _timer;
   StreamSubscription<JobEvent>? _running;
   var _loadingCatalog = false;
+  var _catalogFailed = false;
   var _estimating = false;
+  var _estimateFailed = false;
+
+  /// מונה הרצות: תוצאה של אומדן שכבר הוחלף אינה נוגעת במסך.
+  var _generation = 0;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCatalog());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_loadCatalog());
+    });
   }
 
   @override
@@ -56,43 +64,71 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
   }
 
   Future<void> _loadCatalog() async {
+    // שתי קריאות (initState וה-build) באותה מסגרת לא יריצו שתי טעינות.
+    if (_loadingCatalog) return;
     final state = AppScope.of(context);
     if (state.catalog != null) return;
     final path = state.paths.libraryDbPath;
     if (path == null) return;
-    setState(() => _loadingCatalog = true);
+    setState(() {
+      _loadingCatalog = true;
+      _catalogFailed = false;
+    });
+    var failed = false;
     await for (final event in runJob(catalogEntry, path)) {
       if (event is JobDone) state.setCatalog(event.result! as LibraryCatalog);
-      if (event is JobFailed) state.setError(event.message);
+      if (event is JobFailed) {
+        // ההודעה הגולמית ליומן בלבד; בלי הדגל המסך היה מסתובב לנצח.
+        ErrorLog.instance.record(event.message);
+        state.setError(event.message);
+        failed = true;
+      }
     }
     if (!mounted) return;
-    setState(() => _loadingCatalog = false);
+    setState(() {
+      _loadingCatalog = false;
+      _catalogFailed = failed || state.catalog == null;
+    });
   }
 
   void _onChanged(RemovalSelection removal) {
-    setState(() => _removal = removal);
+    // האומדן הקודם שייך לבחירה אחרת — אסור שיגיע לבדיקת המקום בגזימה.
+    _generation++;
+    setState(() {
+      _removal = removal;
+      _plan = null;
+      _estimating = false;
+      _estimateFailed = false;
+    });
     _timer?.cancel();
     _timer = Timer(_debounce, _estimate);
   }
 
   SubsetSpec? _spec() {
-    final catalog = AppScope.of(context).catalog;
+    final state = AppScope.of(context);
+    final catalog = state.catalog;
     if (catalog == null) return null;
-    return keepSpecFor(catalog, _removal);
+    // הקטלוג נקרא מהספרייה שכבר נגזמה; בלי הכלל הקודם ענף שחלקו נמחק
+    // בעבר נראה שלם, ובבנייה הבאה ממסד מלא מה שנמחק היה חוזר.
+    return keepSpecFor(catalog, _removal, previous: state.spec);
   }
 
   Future<void> _estimate() async {
+    if (!mounted) return;
     final state = AppScope.of(context);
     final path = state.paths.libraryDbPath;
     final spec = _spec();
     if (path == null || spec == null) return;
+    final generation = _generation;
     // הרצה קודמת כבר אינה רלוונטית — ביטול המנוי הורג את ה-`Isolate`
     // שלה, אחרת היו נצברים חישובים על בחירות ישנות.
-    await _running?.cancel();
-    if (!mounted) return;
+    final previous = _running;
+    _running = null;
+    await previous?.cancel();
+    if (!mounted || generation != _generation) return;
     setState(() => _estimating = true);
     _running = runJob(resolveEntry, ResolveArgs(path, spec)).listen((event) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       if (event is JobDone) {
         setState(() {
           _plan = event.result! as SubsetPlan;
@@ -100,7 +136,11 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
         });
       }
       if (event is JobFailed) {
-        setState(() => _estimating = false);
+        ErrorLog.instance.record(event.message);
+        setState(() {
+          _estimating = false;
+          _estimateFailed = true;
+        });
         state.setError(event.message);
       }
     });
@@ -123,11 +163,36 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
     final state = AppScope.of(context);
     final catalog = state.catalog;
 
+    // בלי ספרייה או אחרי כשל אין מה לטעון — ספינר כאן היה מסתובב לנצח.
+    if (state.paths.libraryDbPath == null) {
+      return const _Notice(
+        icon: Icons.travel_explore_rounded,
+        text: 'לא נמצאה ספריית אוצריא. אפשר להצביע עליה ידנית במסך ההגדרות.',
+      );
+    }
+    if (_catalogFailed && !_loadingCatalog && catalog == null) {
+      return _Notice(
+        icon: Icons.error_outline_rounded,
+        text: 'לא הצלחנו לקרוא את רשימת הספרים.',
+        action: TextButton(
+          onPressed: () => unawaited(_loadCatalog()),
+          child: const Text('לנסות שוב'),
+        ),
+      );
+    }
     if (_loadingCatalog || catalog == null) {
+      // הקטלוג יכול להתאפס מבחוץ (אחרי גזימה או החלפת ספרייה) בזמן
+      // שהמסך פתוח — בלי טעינה חוזרת הספינר היה נשאר לתמיד.
+      if (!_loadingCatalog) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_loadCatalog());
+        });
+      }
       return const Center(child: CircularProgressIndicator());
     }
 
     final spec = _spec();
+    final removedBooks = _removedCount(catalog);
     return Column(
       children: [
         Expanded(
@@ -138,11 +203,13 @@ class _BookSelectionScreenState extends State<BookSelectionScreen> {
           ),
         ),
         _SummaryBar(
-          removedBooks: _removedCount(catalog),
+          removedBooks: removedBooks,
           plan: _plan,
           estimating: _estimating,
+          estimateFailed: _estimateFailed,
           currentBytes: state.libraryBytes,
-          onApply: _removal.isEmpty || spec == null
+          // סימון שאינו מוחק אף ספר (קטגוריה ריקה) אינו פעולה.
+          onApply: removedBooks == 0 || spec == null
               ? null
               : () => widget.onApply(spec, _plan?.estimatedBytes),
         ),
@@ -156,6 +223,7 @@ class _SummaryBar extends StatelessWidget {
   final int removedBooks;
   final SubsetPlan? plan;
   final bool estimating;
+  final bool estimateFailed;
   final int currentBytes;
   final VoidCallback? onApply;
 
@@ -163,6 +231,7 @@ class _SummaryBar extends StatelessWidget {
     required this.removedBooks,
     required this.plan,
     required this.estimating,
+    required this.estimateFailed,
     required this.currentBytes,
     required this.onApply,
   });
@@ -194,7 +263,9 @@ class _SummaryBar extends StatelessWidget {
                 Text(
                   removedBooks == 0
                       ? 'לא סומן דבר למחיקה'
-                      : '${formatCount(removedBooks)} ספרים יימחקו',
+                      : removedBooks == 1
+                          ? 'ספר אחד יימחק'
+                          : '${formatCount(removedBooks)} ספרים יימחקו',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -202,9 +273,11 @@ class _SummaryBar extends StatelessWidget {
                 const SizedBox(height: 2),
                 if (removedBooks > 0)
                   Text(
-                    current == null
-                        ? 'מחשב כמה מקום יתפנה…'
-                        : 'יתפנו בערך ${formatBytes(freed)}',
+                    current == null && estimateFailed
+                        ? 'לא הצלחנו לחשב כמה מקום יתפנה'
+                        : current == null
+                            ? 'מחשב כמה מקום יתפנה…'
+                            : 'יתפנו בערך ${formatBytes(freed)}',
                     style: TextStyle(
                       color: AppTheme.readable(context, AppColors.accent),
                     ),
@@ -259,7 +332,7 @@ class _SeveredNotice extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${formatCount(plan.severedLinkCount)} קישורים מצביעים '
+                    '${plan.severedLinkCount == 1 ? 'קישור אחד מצביע' : '${formatCount(plan.severedLinkCount)} קישורים מצביעים'} '
                     'לספרים שסימנת למחיקה, ולכן לא יעבדו. הספרים שאליהם '
                     'מצביעים הכי הרבה:',
                   ),
@@ -273,7 +346,7 @@ class _SeveredNotice extends StatelessWidget {
                             dense: true,
                             title: Text(target.title),
                             subtitle: Text(
-                              '${formatCount(target.linkCount)} קישורים · '
+                              '${formatQuantity(target.linkCount, one: 'קישור אחד', many: 'קישורים')} · '
                               '${formatBytes(target.estimatedBytes)}',
                             ),
                           ),
@@ -292,8 +365,39 @@ class _SeveredNotice extends StatelessWidget {
           ),
         ),
         child: Text(
-          '${formatCount(plan.severedLinkCount)} קישורים לא יעבדו — לפרטים',
+          plan.severedLinkCount == 1
+              ? 'קישור אחד לא יעבוד — לפרטים'
+              : '${formatCount(plan.severedLinkCount)} קישורים לא יעבדו — לפרטים',
           style: TextStyle(color: AppTheme.readable(context, AppColors.warm)),
+        ),
+      );
+}
+
+/// הודעה במרכז המסך, במקום עץ שאין מה להציג בו.
+class _Notice extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Widget? action;
+
+  const _Notice({required this.icon, required this.text, this.action});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 36, color: Theme.of(context).colorScheme.outline),
+              const SizedBox(height: 12),
+              Text(text, textAlign: TextAlign.center),
+              if (action != null) ...[
+                const SizedBox(height: 12),
+                action!,
+              ],
+            ],
+          ),
         ),
       );
 }

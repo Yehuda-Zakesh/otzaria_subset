@@ -107,5 +107,20 @@ void main() {
         0,
       );
     });
+
+    test('התקנה בתוך transaction של הקורא מצטרפת אליו ואינה מגלגלת אותו', () {
+      // ‏BEGIN מקונן נכשל, וה-ROLLBACK שבטיפול בשגיאה היה מבטל בשקט את כל
+      // מה שהקורא כתב לפני כן.
+      db.execute('CREATE TABLE t (x INTEGER)');
+      db.execute('BEGIN');
+      db.execute('INSERT INTO t VALUES (1)');
+      KeepSet.install(db, {1, 2});
+      CategoryKeepSet.install(db, {5});
+      expect(db.autocommit, isFalse, reason: 'ה-transaction של הקורא פתוח');
+      db.execute('COMMIT');
+      expect(db.select('SELECT COUNT(*) c FROM t').first['c'], 1);
+      expect(KeepSet.count(db), 2);
+      expect(CategoryKeepSet.count(db), 1);
+    });
   });
 }

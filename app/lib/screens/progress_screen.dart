@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/update_flow.dart';
 import '../theme.dart';
+import '../widgets/format.dart';
 import '../widgets/icon_badge.dart';
 
 /// מסך התקדמות לפעולה ארוכה.
@@ -43,6 +44,22 @@ class ProgressScreen extends StatelessWidget {
         FlowStage.done => 3,
       };
 
+  /// יחס מחוץ ל-0..1 (מונה שעבר את הסך) או NaN מצויר כפס שבור — עדיף
+  /// פס לא-מוגדר.
+  static double? _safeFraction(double? value) {
+    if (value == null || !value.isFinite) return null;
+    return value.clamp(0.0, 1.0);
+  }
+
+  /// הודעות המנוע נושאות לעתים שמות טבלאות ושלבים פנימיים (§13) — אז
+  /// מוצג רק שם התחנה.
+  static String _message(FlowProgress? progress) {
+    if (progress == null) return 'מתחיל…';
+    final message = progress.message.trim();
+    if (message.isNotEmpty && !hasInternalTerms(message)) return message;
+    return '${_steps[_reached(progress.stage)].label}…';
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -73,13 +90,13 @@ class ProgressScreen extends StatelessWidget {
                   child: SizedBox(
                     height: 10,
                     child: LinearProgressIndicator(
-                      value: current?.fraction,
+                      value: _safeFraction(current?.fraction),
                       backgroundColor: scheme.primary.withValues(alpha: 0.12),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(current?.message ?? 'מתחיל…'),
+                Text(_message(current)),
               ],
               const SizedBox(height: 28),
               Row(

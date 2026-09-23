@@ -27,16 +27,21 @@ class KeepSet {
         '(bookId INTEGER PRIMARY KEY NOT NULL)');
     db.execute('DELETE FROM $table');
     final stmt = db.prepare('INSERT OR IGNORE INTO $table (bookId) VALUES (?)');
+    // בתוך transaction של הקורא BEGIN נכשל, וה-ROLLBACK שאחריו היה מבטל
+    // את כל העבודה שלו. אז מצטרפים ל-transaction הקיים במקום לפתוח חדש.
+    final ownTx = db.autocommit;
     try {
-      db.execute('BEGIN');
+      if (ownTx) db.execute('BEGIN');
       for (final id in bookIds) {
         stmt.execute([id]);
       }
-      db.execute('COMMIT');
+      if (ownTx) db.execute('COMMIT');
     } catch (_) {
-      try {
-        db.execute('ROLLBACK');
-      } catch (_) {}
+      if (ownTx) {
+        try {
+          db.execute('ROLLBACK');
+        } catch (_) {}
+      }
       rethrow;
     } finally {
       stmt.close();
@@ -91,16 +96,21 @@ class CategoryKeepSet {
     db.execute('DELETE FROM $table');
     final stmt =
         db.prepare('INSERT OR IGNORE INTO $table (categoryId) VALUES (?)');
+    // בתוך transaction של הקורא BEGIN נכשל, וה-ROLLBACK שאחריו היה מבטל
+    // את כל העבודה שלו. אז מצטרפים ל-transaction הקיים במקום לפתוח חדש.
+    final ownTx = db.autocommit;
     try {
-      db.execute('BEGIN');
+      if (ownTx) db.execute('BEGIN');
       for (final id in categoryIds) {
         stmt.execute([id]);
       }
-      db.execute('COMMIT');
+      if (ownTx) db.execute('COMMIT');
     } catch (_) {
-      try {
-        db.execute('ROLLBACK');
-      } catch (_) {}
+      if (ownTx) {
+        try {
+          db.execute('ROLLBACK');
+        } catch (_) {}
+      }
       rethrow;
     } finally {
       stmt.close();

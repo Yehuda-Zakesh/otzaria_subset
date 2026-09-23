@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria_subset/otzaria_subset.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 /// בדיקות ל-URI של SQLite (`readOnlyUri`, `immutableUri`).
 ///
@@ -68,6 +72,81 @@ void main() {
       expect(uri.split('?').length, 2);
     });
   });
+
+  group('ATTACH אמיתי דרך SQLite', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('uri_attach'));
+    tearDown(() {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    String makeDb(String folder) {
+      final sub = Directory(p.join(dir.path, folder))
+        ..createSync(recursive: true);
+      final path = p.join(sub.path, 'src.db');
+      final db = sqlite3.sqlite3.open(path);
+      db.execute('CREATE TABLE t (x INTEGER)');
+      db.execute('INSERT INTO t VALUES (42)');
+      db.close();
+      return path;
+    }
+
+    int attachAndRead(String uri) {
+      final main = sqlite3.sqlite3.open(p.join(dir.path, 'main.db'), uri: true);
+      try {
+        main.execute('ATTACH DATABASE ? AS f', [uri]);
+        return main.select('SELECT x FROM f.t').first['x'] as int;
+      } finally {
+        main.close();
+      }
+    }
+
+    test('תווים מיוחדים בנתיב (#, %, עברית, רווח) פותחים את הקובץ הנכון', () {
+      for (final folder in ['a b', 'x#y', 'p%20q', 'שלום', "o'k&z=1"]) {
+        expect(attachAndRead(readOnlyUri(makeDb(folder))), 42, reason: folder);
+      }
+    });
+
+    test('נתיב יחסי נפתח כ-URI ולא כשם קובץ מילולי', () {
+      // בלי המרה לנתיב מוחלט `Uri.file` מחזיר "src.db" בלי `file:`,
+      // ו-SQLite ניסה לפתוח קובץ בשם "src.db?mode=ro".
+      final path = makeDb('rel');
+      final prev = Directory.current;
+      Directory.current = p.dirname(path);
+      try {
+        final uri = readOnlyUri('src.db');
+        expect(uri, startsWith('file:///'));
+        expect(attachAndRead(uri), 42);
+      } finally {
+        Directory.current = prev;
+      }
+    });
+
+    test('נתיב UNC נפתח (SQLite דוחה authority שאינו ריק)', () {
+      final local = makeDb('unc');
+      final unc = '\\\\localhost\\${local[0]}\$${local.substring(2)}';
+      if (!File(unc).existsSync()) {
+        markTestSkipped('שיתוף ניהולי C\$ אינו זמין במכונה הזו');
+        return;
+      }
+      expect(readOnlyUri(unc), startsWith('file:////localhost/'));
+      expect(attachAndRead(readOnlyUri(unc)), 42);
+    });
+
+    test('mode=ro באמת חוסם כתיבה למסד המחובר', () {
+      final path = makeDb('ro');
+      final main = sqlite3.sqlite3.open(p.join(dir.path, 'main.db'), uri: true);
+      try {
+        main.execute('ATTACH DATABASE ? AS f', [readOnlyUri(path)]);
+        expect(() => main.execute('INSERT INTO f.t VALUES (1)'),
+            throwsA(isA<sqlite3.SqliteException>()));
+      } finally {
+        main.close();
+      }
+    });
+  }, skip: !Platform.isWindows);
 
   test('readOnlyUri ו-immutableUri חלוקים באותו בסיס, רק הסיומת שונה', () {
     // שני ה-URIs חייבים להצביע לאותו קובץ בדיוק — ההבדל היחיד הוא ההרשאה

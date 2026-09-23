@@ -31,6 +31,18 @@ class UpdateGuardBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = settings;
     if (current == null) return const SizedBox.shrink();
+    if (current.manualUpdateStillAvailable) {
+      return _tile(
+        context,
+        color: AppColors.warm,
+        soft: AppColors.warmSoft,
+        icon: Icons.info_outline_rounded,
+        title: 'מוגן, אבל לא ללחוץ על "עדכון ספרייה" באוצריא',
+        body: 'אוצריא לא תעדכן את הספרייה בעצמה. אבל העדכון הידני שלה '
+            'עדיין פעיל, ולחיצה עליו תוריד את כל הספרים מחדש. כדי לסגור '
+            'גם את זה אפשר לכבות באוצריא את "עדכוני תוכנה וספרים".',
+      );
+    }
     if (current.isDisabled) {
       return _tile(
         context,

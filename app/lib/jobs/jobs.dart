@@ -80,15 +80,34 @@ Stream<JobEvent> runJob<A>(
     await controller.close();
   }
 
+  void fail(String message) {
+    if (!controller.isClosed) controller.add(JobFailed(message));
+    unawaited(shutdown());
+  }
+
   receive.listen((Object? message) {
-    if (message is! JobEvent) return;
-    if (!controller.isClosed) controller.add(message);
-    if (message is JobDone || message is JobFailed) unawaited(shutdown());
+    if (message is JobEvent) {
+      if (!controller.isClosed) controller.add(message);
+      if (message is JobDone || message is JobFailed) unawaited(shutdown());
+      return;
+    }
+    // שגיאה שלא נתפסה (רשימה) או יציאה בלי הודעת סיום (null): בלי זה
+    // הזרם לא נסגר לעולם ומסך ההתקדמות נתקע לנצח.
+    if (message is List && message.isNotEmpty) {
+      fail('${message.first}');
+    } else if (message == null) {
+      fail('הפעולה הופסקה באמצע בלי לדווח על תוצאה.');
+    }
   });
 
   controller.onCancel = shutdown;
 
-  Isolate.spawn(entry, JobRequest<A>(receive.sendPort, args)).then(
+  Isolate.spawn(
+    entry,
+    JobRequest<A>(receive.sendPort, args),
+    onError: receive.sendPort,
+    onExit: receive.sendPort,
+  ).then(
     (spawned) {
       if (closed) {
         spawned.kill(priority: Isolate.immediate);
@@ -96,10 +115,7 @@ Stream<JobEvent> runJob<A>(
         isolate = spawned;
       }
     },
-    onError: (Object error) {
-      if (!controller.isClosed) controller.add(JobFailed('$error'));
-      unawaited(shutdown());
-    },
+    onError: (Object error) => fail('$error'),
   );
 
   return controller.stream;
@@ -285,7 +301,8 @@ void pruneEntry(JobRequest<PruneArgs> req) {
     if (indexDir != null) {
       port.send(const JobStage('invalidateIndex'));
       try {
-        const OtzariaIndexInvalidator().invalidate(indexDir);
+        const OtzariaIndexInvalidator()
+            .invalidate(indexDir, protectedPaths: [req.args.path]);
       } on IndexInvalidationException {
         // אינדקס שלא בוטל אינו מצדיק לבטל מחיקה שהצליחה.
       }

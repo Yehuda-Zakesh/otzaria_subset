@@ -179,4 +179,62 @@ void main() {
         reason: 'לאף אחת מהקטגוריות המעורבות (L1..L3) אין ספר ישיר');
     expect(spec.excludeBookIds, isEmpty);
   });
+
+  group('previous — קטלוג של ספרייה שכבר גוזמה', () {
+    // הספרייה המלאה: 1 → 10 (ספרים 1,2), 11 (ספרים 3,4). בגיזום הראשון
+    // נמחקו ספר 2 וקטגוריה 11.
+    final full = LibraryCatalog(
+      [cat(1, null, 'שורש'), cat(10, 1, 'א'), cat(11, 1, 'ב')],
+      [book(1, 10, '1'), book(2, 10, '2'), book(3, 11, '3'), book(4, 11, '4')],
+    );
+    final first = keepSpecFor(
+      full,
+      const RemovalSelection(categoryIds: {11}, bookIds: {2}),
+    );
+    // מה שהמסך רואה אחר כך: רק מה שנשאר בספרייה.
+    final pruned = LibraryCatalog(
+      [cat(1, null, 'שורש'), cat(10, 1, 'א')],
+      [book(1, 10, '1')],
+    );
+
+    test('ענף שנראה שלם רק מפני שחלקו נמחק אינו הופך לכלל קטגוריה', () {
+      final spec = keepSpecFor(pruned, RemovalSelection.empty, previous: first);
+
+      expect(spec.categoryIds, isEmpty,
+          reason: 'כלל על שורש 1 היה מחזיר את 2,3,4 בבנייה ממסד מלא');
+      expect(spec.includeBookIds, {1});
+      expect(spec.excludeBookIds, contains(2));
+    });
+
+    test('ענף שהכלל הקודם כיסה נשאר כלל קטגוריה', () {
+      final spec = keepSpecFor(
+        LibraryCatalog(
+          [cat(1, null, 'שורש'), cat(10, 1, 'א')],
+          [book(1, 10, '1'), book(2, 10, '2')],
+        ),
+        RemovalSelection.empty,
+        previous: const SubsetSpec(categoryIds: {10}),
+      );
+      expect(spec.categoryIds, {10});
+      expect(spec.includeBookIds, isEmpty);
+    });
+
+    test('ספר שממתין להבאה ואינו בקטלוג נשאר בכלל', () {
+      final spec = keepSpecFor(
+        pruned,
+        RemovalSelection.empty,
+        previous: first.copyWith(includeBookIds: {...first.includeBookIds, 7}),
+      );
+      expect(spec.includeBookIds, {1, 7});
+    });
+
+    test('בלי previous, או עם כלל ריק של פרופיל חדש, ההתנהגות כמקודם', () {
+      expect(keepSpecFor(pruned, RemovalSelection.empty).categoryIds, {1});
+      expect(
+        keepSpecFor(pruned, RemovalSelection.empty, previous: SubsetSpec.empty)
+            .categoryIds,
+        {1},
+      );
+    });
+  });
 }

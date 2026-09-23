@@ -206,4 +206,166 @@ void main() {
           reason: 'ה-.bak משוחזר בחזרה למקום היעד, לא נשאר לצדו');
     });
   });
+
+  group('רגרסיה', () {
+    test('גיזום במקום עם deleteFullDbWhenDone=true אינו מוחק את התוצאה', () {
+      // מקור ויעד זהים (§11 ב-AGENTS.md). ברירת המחדל true הייתה מוחקת
+      // את התת-קבוצה שזה עתה הוחלפה למקום.
+      buildFullDb(at('seforim.db'));
+      final result = const SubsetRebuilder().rebuild(
+        fullDbPath: at('seforim.db'),
+        targetPath: at('seforim.db'),
+        spec: const SubsetSpec(categoryIds: {10}),
+      );
+      expect(result.bookIds, {1, 2});
+      expect(File(at('seforim.db')).existsSync(), isTrue);
+      on(at('seforim.db'), (db) {
+        expect(colOf(db, 'book', 'id'), {1, 2});
+      });
+    });
+
+    test('גיזום במקום של מסד במצב WAL מצליח', () {
+      // מקור במצב WAL שמחובר לקריאה בלבד נכשל ב-`journal_mode = OFF` של
+      // הבנייה; היעד (שהוא גם המקור) מוחזר ל-rollback journal לפניה.
+      buildFullDb(at('seforim.db'));
+      final db = sqlite3.sqlite3.open(at('seforim.db'));
+      try {
+        db.execute('PRAGMA journal_mode = WAL');
+      } finally {
+        db.close();
+      }
+
+      final result = const SubsetRebuilder().rebuild(
+        fullDbPath: at('seforim.db'),
+        targetPath: at('seforim.db'),
+        spec: const SubsetSpec(categoryIds: {10}),
+        deleteFullDbWhenDone: false,
+      );
+      expect(result.bookIds, {1, 2});
+      on(at('seforim.db'), (db) {
+        expect(colOf(db, 'book', 'id'), {1, 2});
+      });
+    });
+
+    test('בחירה של מזהים שאינם במסד המלא אינה מחליפה את הספרייה בריקה', () {
+      buildFullDb(at('full.db'));
+      File(at('subset.db')).writeAsStringSync('ספרייה ישנה');
+      expect(
+        () => const SubsetRebuilder().rebuild(
+          fullDbPath: at('full.db'),
+          targetPath: at('subset.db'),
+          spec: const SubsetSpec(includeBookIds: {999}),
+          deleteFullDbWhenDone: false,
+        ),
+        throwsA(isA<SubsetRebuildException>()),
+      );
+      expect(File(at('subset.db')).readAsStringSync(), 'ספרייה ישנה');
+    });
+
+    test('bookIds בתוצאה אינו כולל מזהים שאינם קיימים במסד המלא', () {
+      buildFullDb(at('full.db'));
+      final result = const SubsetRebuilder().rebuild(
+        fullDbPath: at('full.db'),
+        targetPath: at('subset.db'),
+        spec: const SubsetSpec(categoryIds: {10}, includeBookIds: {999}),
+        deleteFullDbWhenDone: false,
+      );
+      expect(result.bookIds, {1, 2});
+    });
+
+    test('WAL ישן של הספרייה הקודמת אינו מוחל על הספרייה החדשה', () {
+      buildFullDb(at('full.db'));
+      const SubsetBuilder().build(
+        sourcePath: at('full.db'),
+        targetPath: at('subset.db'),
+        bookIds: {1, 2},
+      );
+      leaveStaleWal(at('subset.db'));
+
+      final result = const SubsetRebuilder().rebuild(
+        fullDbPath: at('full.db'),
+        targetPath: at('subset.db'),
+        spec: const SubsetSpec(categoryIds: {11}),
+        deleteFullDbWhenDone: false,
+      );
+
+      expect(File('${at('subset.db')}-wal').existsSync(), isFalse,
+          reason: 'WAL שנשאר ליד קובץ אחר מוחל עליו בפתיחה הבאה');
+      on(at('subset.db'), (db) {
+        // ‏`junk` קיימת רק ב-WAL של הקובץ הישן; הופעתה פירושה שדפים שלו
+        // הולבשו על הקובץ החדש.
+        expect(
+          db.select("SELECT 1 FROM sqlite_master WHERE name = 'junk'"),
+          isEmpty,
+        );
+        expect(colOf(db, 'book', 'id'), {3, 4});
+        expect(
+          const SubsetHasher().compute(db, schemaVersion: 5),
+          result.subsetHash,
+        );
+      });
+    });
+
+    test('WAL יתום ליד יעד שאינו קיים אינו מוחל על הספרייה החדשה', () {
+      buildFullDb(at('full.db'));
+      const SubsetBuilder().build(
+        sourcePath: at('full.db'),
+        targetPath: at('other.db'),
+        bookIds: {1, 2},
+      );
+      leaveStaleWal(at('other.db'));
+      File('${at('other.db')}-wal').renameSync('${at('subset.db')}-wal');
+
+      const SubsetRebuilder().rebuild(
+        fullDbPath: at('full.db'),
+        targetPath: at('subset.db'),
+        spec: const SubsetSpec(categoryIds: {11}),
+        deleteFullDbWhenDone: false,
+      );
+
+      expect(File('${at('subset.db')}-wal').existsSync(), isFalse);
+      on(at('subset.db'), (db) {
+        expect(
+          db.select("SELECT 1 FROM sqlite_master WHERE name = 'junk'"),
+          isEmpty,
+        );
+        expect(colOf(db, 'book', 'id'), {3, 4});
+      });
+    });
+
+    test('תיקיית "אינדקס" שמכילה את הספרייה עצמה אינה נמחקת', () {
+      buildFullDb(at('full.db'));
+      final lib = Directory(at('lib'))..createSync();
+      final target = p.join(lib.path, 'seforim.db');
+      // הגדרת נתיב אינדקס שגויה שמצביעה על תיקיית הספרייה עצמה.
+      File(p.join(lib.path, 'meta.json')).writeAsStringSync('{}');
+
+      final result = const SubsetRebuilder().rebuild(
+        fullDbPath: at('full.db'),
+        targetPath: target,
+        spec: const SubsetSpec(categoryIds: {10}),
+        deleteFullDbWhenDone: false,
+        indexDir: lib.path,
+      );
+
+      expect(result.indexInvalidation, isNull);
+      expect(File(target).existsSync(), isTrue);
+    });
+  });
+}
+
+/// משאיר ליד [path] קובץ `-wal` "חם" — כמו אחרי קריסה של תהליך שכתב
+/// למסד במצב WAL. ה-WAL תקין ומתאים ל-[path] עצמו.
+void leaveStaleWal(String path) {
+  final db = sqlite3.sqlite3.open(path);
+  final saved = '$path.saved-wal';
+  try {
+    db.execute('PRAGMA journal_mode = WAL');
+    db.execute('CREATE TABLE junk (x)');
+    db.execute('INSERT INTO junk VALUES (1)');
+    File('$path-wal').copySync(saved);
+  } finally {
+    db.close();
+  }
+  File(saved).renameSync('$path-wal');
 }

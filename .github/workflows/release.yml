@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# שתי הרצות במקביל היו מעלות לאותה גרסה, בונות פעמיים ונופלות רק בדחיפה.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
@@ -62,6 +67,12 @@ jobs:
           $newPatch = [int]$rootMatch.Groups[3].Value + 1
           $newVersion = "$($rootMatch.Groups[1].Value).$($rootMatch.Groups[2].Value).$newPatch"
 
+          # תג שנשאר מאחור (למשל אחרי מחיקת Release) היה מפיל את השלב
+          # האחרון, אחרי כל הבנייה. בודקים לפני שמתחילים.
+          git rev-parse -q --verify "refs/tags/v$newVersion" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "התג v$newVersion כבר קיים — צריך למחוק אותו או להעלות את הגרסה ידנית" }
+          $global:LASTEXITCODE = 0
+
           $newRootContent = [regex]::Replace($rootContent, $versionPattern, "version: $newVersion")
           $newAppContent  = [regex]::Replace($appContent,  $versionPattern, "version: $newVersion")
 
@@ -109,13 +120,16 @@ jobs:
       - name: Commit version bump and tag
         shell: pwsh
         run: |
+          # ‏pwsh ממשיך אחרי פקודה חיצונית שנכשלה, וקוד היציאה של השלב הוא
+          # רק של האחרונה — commit או tag שנכשלו לא היו עוצרים את הדחיפה.
+          $PSNativeCommandUseErrorActionPreference = $true
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pubspec.yaml app/pubspec.yaml
           git commit -m "עדכון גרסה ל-${{ steps.bump-version.outputs.version }}"
           git tag "v${{ steps.bump-version.outputs.version }}"
-          git push origin HEAD:main
-          git push origin "v${{ steps.bump-version.outputs.version }}"
+          # ‏--atomic: אחרת main יכול לזוז לגרסה החדשה בלי התג שלה.
+          git push --atomic origin HEAD:main "v${{ steps.bump-version.outputs.version }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

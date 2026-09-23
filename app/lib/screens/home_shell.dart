@@ -14,6 +14,7 @@ import '../services/update_flow.dart';
 import '../theme.dart';
 import '../widgets/app_update.dart';
 import '../widgets/disclaimer.dart';
+import '../widgets/format.dart';
 import '../widgets/update_guard.dart';
 import 'book_selection_screen.dart';
 import 'home_screen.dart';
@@ -41,6 +42,20 @@ class _HomeShellState extends State<HomeShell> {
   String? _flowError;
   StreamSubscription<FlowProgress>? _flow;
 
+  /// פעולה על הספרייה בתהליך — מהלחיצה הראשונה (עוד לפני הדיאלוגים)
+  /// ועד שהזרם נסגר באמת. בלי זה לחיצה כפולה, או בדיקת עדכונים ברקע
+  /// בזמן גזימה, היו מריצות שתי פעולות על אותו קובץ.
+  var _launching = false;
+  var _flowActive = false;
+
+  /// נדבק עד סוף הזרימה: אחרי נקודת האל-חזור אין ביטול — ראו
+  /// `FlowProgress.committing`.
+  var _committing = false;
+
+  /// הספרייה שהמצב הנוכחי (ספירות, קטלוג) נקרא ממנה.
+  String? _libraryPath;
+  var _libraryPathKnown = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,12 +67,36 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // החלפת ספרייה בהגדרות: הקטלוג והספירות של הקודמת אסור שיישארו —
+    // בחירה על קטלוג ישן הייתה נגזמת לפי מזהים של ספרייה אחרת.
+    final path = _state.paths.libraryDbPath;
+    if (!_libraryPathKnown) {
+      _libraryPathKnown = true;
+      _libraryPath = path;
+      return;
+    }
+    if (path == _libraryPath) return;
+    _libraryPath = path;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _state
+        ..setCatalog(null)
+        ..setStats(null);
+      unawaited(_loadStats());
+    });
+  }
+
+  @override
   void dispose() {
     unawaited(_flow?.cancel());
     super.dispose();
   }
 
   AppState get _state => AppScope.of(context);
+
+  bool get _busy => _launching || _flowActive;
 
   /// ההבהרה מוצגת פעם אחת, לפני שהמשתמש נוגע במשהו — ראו kDisclaimer.
   Future<void> _showDisclaimerIfNeeded() async {
@@ -83,10 +122,14 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _loadStats() async {
-    final path = _state.paths.libraryDbPath;
+    final state = _state;
+    final path = state.paths.libraryDbPath;
     if (path == null || !File(path).existsSync()) return;
     await for (final event in runJob(statsEntry, path)) {
-      if (event is JobDone) _state.setStats(event.result! as LibraryStats);
+      // ספירה של ספרייה שכבר הוחלפה בינתיים אינה נכונה לאף מסך.
+      if (event is JobDone && state.paths.libraryDbPath == path) {
+        state.setStats(event.result! as LibraryStats);
+      }
     }
   }
 
@@ -104,7 +147,8 @@ class _HomeShellState extends State<HomeShell> {
   /// זמינה רק מהמסך הראשי — לא באמצע גזימה או עדכון של הספרייה.
   Future<void> _installAppUpdate() async {
     final release = _appUpdate;
-    if (release == null) return;
+    // עדכון התוכנה סוגר אותה — אסור באמצע פעולה על הספרייה.
+    if (release == null || _busy) return;
     if (!await showAppUpdateDialog(context, release)) return;
     if (!mounted) return;
     setState(() => _appUpdate = null);
@@ -129,6 +173,9 @@ class _HomeShellState extends State<HomeShell> {
   // ── בדיקת עדכונים ────────────────────────────────────────────────
 
   Future<void> _checkUpdates() async {
+    // לפני המחיקה הראשונה הספרייה עדיין של אוצריא, והזרימה מסרבת לעדכן
+    // אותה — "יש עדכון" כאן היה מבטיח משהו שלא יקרה.
+    if (_checking || _busy || !_state.hasSubset) return;
     final flow = _buildFlow();
     if (flow == null) return;
     setState(() => _checking = true);
@@ -139,7 +186,9 @@ class _HomeShellState extends State<HomeShell> {
         case LibraryUpdatePlanKind.none:
           setState(() => _updateNotice = null);
         case LibraryUpdatePlanKind.blocked:
-          setState(() => _updateNotice = plan.reason ?? 'העדכון אינו זמין');
+          // הסיבה מהמתכנן מדברת על סכמות ועל DB — ליומן, לא למסך.
+          ErrorLog.instance.record('העדכון חסום: ${plan.reason}');
+          setState(() => _updateNotice = 'העדכון אינו זמין כרגע');
         case LibraryUpdatePlanKind.delta:
         case LibraryUpdatePlanKind.fullDownload:
           setState(() => _updateNotice = 'יש עדכון זמין');
@@ -147,7 +196,12 @@ class _HomeShellState extends State<HomeShell> {
       }
     } catch (e) {
       ErrorLog.instance.record('בדיקת העדכונים נכשלה: $e');
-      if (mounted) setState(() => _updateNotice = 'בדיקת העדכונים נכשלה');
+      if (mounted) {
+        setState(
+          () => _updateNotice =
+              userFacingError(e, fallback: 'בדיקת העדכונים נכשלה'),
+        );
+      }
     } finally {
       if (mounted) setState(() => _checking = false);
     }
@@ -155,11 +209,18 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _runUpdate(SubsetUpdateFlow flow, LibraryUpdatePlan plan) async {
     final profile = _state.profile;
-    if (profile == null) return;
-    if (!await _confirmOtzariaClosed()) return;
-    if (!await _confirmGuard()) return;
+    if (profile == null || _busy) return;
+    _launching = true;
+    try {
+      if (!await _confirmOtzariaClosed()) return;
+      if (!await _confirmGuard()) return;
+      if (!mounted) return;
+    } finally {
+      _launching = false;
+    }
     _startFlow(
       'מעדכן את הספרייה',
+      clearsUpdateNotice: true,
       flow.run(
         plan: plan,
         profile: profile,
@@ -179,10 +240,16 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _applySelection(SubsetSpec spec, int? estimatedBytes) async {
     final flow = _buildFlow();
     final profile = _state.profile;
-    if (flow == null || profile == null) return;
-    if (!await _confirmOtzariaClosed()) return;
-    if (!await _confirmGuard()) return;
-    if (!await _confirmPrune(spec)) return;
+    if (flow == null || profile == null || _busy) return;
+    _launching = true;
+    try {
+      if (!await _confirmOtzariaClosed()) return;
+      if (!await _confirmGuard()) return;
+      if (!mounted || !await _confirmPrune(spec)) return;
+      if (!mounted) return;
+    } finally {
+      _launching = false;
+    }
     _state.setCatalog(null);
     _startFlow(
       'מעדכן את הספרייה',
@@ -269,40 +336,81 @@ class _HomeShellState extends State<HomeShell> {
 
   // ── הרצה ─────────────────────────────────────────────────────────
 
-  void _startFlow(String title, Stream<FlowProgress> stream) {
+  void _startFlow(
+    String title,
+    Stream<FlowProgress> stream, {
+    bool clearsUpdateNotice = false,
+  }) {
     setState(() {
       _view = _View.progress;
       _progressTitle = title;
       _progress = null;
       _flowError = null;
       _cancelled = false;
+      _committing = false;
+      _flowActive = true;
     });
+    var failed = false;
     _flow = stream.listen(
-      (event) => setState(() => _progress = event),
+      (event) {
+        if (event.committing) _committing = true;
+        if (mounted) setState(() => _progress = event);
+      },
       onError: (Object error) {
+        failed = true;
         ErrorLog.instance.record('הפעולה נכשלה: $error');
-        setState(() => _flowError = '$error');
+        if (!mounted) return;
+        // החריגה הגולמית (שמות טבלאות, patch, סוגי חריגות) נשארת ביומן.
+        setState(
+          () => _flowError = userFacingError(
+            error,
+            fallback: 'הפעולה לא הושלמה. אפשר לנסות שוב, ואם זה חוזר — '
+                'לשלוח דיווח תקלה ממסך ההגדרות.',
+          ),
+        );
       },
       onDone: () {
-        unawaited(_loadStats());
-        _state.setCatalog(null);
+        _flow = null;
+        if (!mounted) return;
+        setState(() {
+          _flowActive = false;
+          // העדכון הוחל — "יש עדכון זמין" כבר אינו נכון.
+          if (clearsUpdateNotice && !failed) _updateNotice = null;
+        });
+        _afterLibraryChanged();
       },
     );
   }
 
-  void _cancel() {
+  /// הספרייה אולי השתנתה — הספירות והקטלוג נקראים ממנה מחדש.
+  void _afterLibraryChanged() {
+    unawaited(_loadStats());
+    _state.setCatalog(null);
+  }
+
+  Future<void> _cancel() async {
+    final flow = _flow;
+    if (flow == null || _cancelled || _committing) return;
     _cancelled = true;
-    unawaited(_flow?.cancel());
     setState(() => _flowError = 'הפעולה בוטלה.');
+    // הסרגל נשאר נעול עד שהביטול באמת הסתיים, והספרייה נקראת מחדש: ייתכן
+    // שחלק מהעבודה כבר נכתב לפני שהביטול תפס.
+    await flow.cancel();
+    _flow = null;
+    if (!mounted) return;
+    setState(() => _flowActive = false);
+    _afterLibraryChanged();
   }
 
   // ── תצוגה ────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final busy = _view == _View.progress &&
-        _flowError == null &&
-        _progress?.stage != FlowStage.done;
+    // גם אחרי "בוטלה" או שגיאה — כל עוד הזרם לא נסגר, העבודה עוד רצה.
+    final busy = _busy ||
+        (_view == _View.progress &&
+            _flowError == null &&
+            _progress?.stage != FlowStage.done);
 
     final surfaces = AppSurfaces.of(context);
 
@@ -352,7 +460,7 @@ class _HomeShellState extends State<HomeShell> {
             title: _progressTitle ?? '',
             progress: _progress,
             error: _flowError,
-            onCancel: _cancel,
+            onCancel: _committing ? null : () => unawaited(_cancel()),
             onClose: () => setState(() => _view = _View.home),
           ),
       };

@@ -103,12 +103,12 @@ abstract final class ZstdFileStream {
           });
 
     try {
-      await Isolate.run(() => _decompress(
-            sourcePath,
-            destPath,
-            cancelFlag.address,
-            progress.sendPort,
-          ));
+      await _runIsolate(
+        sourcePath,
+        destPath,
+        cancelFlag.address,
+        progress.sendPort,
+      );
       return true;
     } finally {
       await poll?.cancel();
@@ -116,6 +116,19 @@ abstract final class ZstdFileStream {
       malloc.free(cancelFlag);
     }
   }
+
+  /// מתודה נפרדת כדי שסוגר ה-`Isolate.run` ייווצר בהקשר שיש בו רק ערכים
+  /// ניתנים לשליחה. סוגר בתוך [decompressFileToFile] לכד את ה-`ReceivePort`
+  /// ואת ה-`Pointer` — שניהם אינם ניתנים לשליחה, והפירוק נכשל תמיד.
+  static Future<void> _runIsolate(
+    String sourcePath,
+    String destPath,
+    int cancelFlagAddress,
+    SendPort progress,
+  ) =>
+      Isolate.run(
+        () => _decompress(sourcePath, destPath, cancelFlagAddress, progress),
+      );
 }
 
 /// הלולאה עצמה. פונקציה גלובלית שמקבלת פרימיטיבים בלבד — ראו §9
@@ -154,6 +167,7 @@ void _decompress(
     );
 
     var read = 0;
+    var last = 0;
     final chunk = Uint8List(inSize);
     while (true) {
       if (cancelFlag.value != 0) {
@@ -176,12 +190,19 @@ void _decompress(
         if (bindings.ZSTD_isError(code) != 0) {
           throw const ZstdStreamException('הארכיון פגום או קטוע');
         }
+        last = code;
         if (output.ref.pos > 0) {
           dest.writeFromSync(outBuffer.asTypedList(output.ref.pos));
         }
       }
       progress.send(read);
     }
+    // ‏0 = ה-frame נסגר. כל ערך אחר (או קובץ ריק) = קלט קטוע, ומסד חתוך
+    // שנכתב ממנו היה נראה תקין עד שמנסים לקרוא אותו.
+    if (read == 0 || last != 0) {
+      throw const ZstdStreamException('הארכיון פגום או קטוע');
+    }
+    dest.flushSync();
   } finally {
     if (dctx != nullptr) bindings.ZSTD_freeDCtx(dctx);
     malloc.free(inBuffer);
@@ -223,6 +244,7 @@ Future<void> decompressStreamToFile(
   final dctx = bindings.ZSTD_createDCtx();
   final dest = File(destPath).openSync(mode: FileMode.write);
   var read = 0;
+  var last = 0;
 
   try {
     if (dctx == nullptr) {
@@ -262,12 +284,19 @@ Future<void> decompressStreamToFile(
         if (bindings.ZSTD_isError(code) != 0) {
           throw const ZstdStreamException('הארכיון פגום או קטוע');
         }
+        last = code;
         if (output.ref.pos > 0) {
           dest.writeFromSync(outBuffer.asTypedList(output.ref.pos));
         }
       }
       onProgress?.call(read);
     }
+    // חיבור שנסגר באמצע מסיים את הזרם בלי שגיאה — רק ה-frame הפתוח מגלה
+    // שהמסד שנכתב חתוך.
+    if (read == 0 || last != 0) {
+      throw const ZstdStreamException('הארכיון פגום או קטוע');
+    }
+    dest.flushSync();
   } finally {
     if (dctx != nullptr) bindings.ZSTD_freeDCtx(dctx);
     if (inBuffer != nullptr) malloc.free(inBuffer);

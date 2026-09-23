@@ -110,6 +110,15 @@ void main() {
       expect(loaded.hasLibrary, isTrue);
     });
 
+    test('categoriesPruned שורד הלוך ושוב, וחסר בקובץ ישן נקרא false', () {
+      // אובדן הדגל היה מסנן patch-ים בלי גיזום הקטגוריות שאיתו נבנה המסד.
+      store.save(const SubsetProfile(
+          id: 'pruned', label: 'א', categoriesPruned: true));
+      expect(store.load('pruned')!.categoriesPruned, isTrue);
+      fileFor('old').writeAsStringSync(jsonEncode({'id': 'old'}));
+      expect(store.load('old')!.categoriesPruned, isFalse);
+    });
+
     test('שדות אופציונליים ריקים חוזרים null', () {
       store.save(const SubsetProfile(id: 'bare', label: 'ריק'));
       final loaded = store.load('bare')!;
@@ -158,6 +167,39 @@ void main() {
       store.save(const SubsetProfile(id: 'atomic', label: 'א'));
       store.save(const SubsetProfile(id: 'atomic', label: 'ב'));
       expect(filesInDir(), equals(['atomic.json']));
+    });
+
+    test('כשל ב-rename אינו מוחק את הפרופיל הקיים', () {
+      // מחיקה לפני rename הייתה משאירה, כשה-rename נכשל, גם בלי קובץ
+      // וגם בלי .tmp — והאפליקציה הייתה יוצרת פרופיל ריק במקומו.
+      store.save(const SubsetProfile(id: 'keep', label: 'א', dbVersion: 7));
+      final tmp = File('${fileFor('keep').path}.tmp')..writeAsStringSync('');
+      // ידית פתוחה בלי שיתוף-מחיקה חוסמת rename של ה-.tmp ב-Windows.
+      final handle = tmp.openSync(mode: FileMode.append);
+      try {
+        expect(
+          () => store
+              .save(const SubsetProfile(id: 'keep', label: 'א', dbVersion: 8)),
+          throwsA(isA<ProfileStoreException>()),
+        );
+      } finally {
+        handle.closeSync();
+      }
+      expect(store.load('keep')?.dbVersion, 7);
+    }, skip: !Platform.isWindows);
+
+    test('load משחזר מ-.tmp שלם כשהקובץ עצמו חסר', () {
+      // גרסה קודמת מחקה את הקובץ לפני ה-rename; נפילה ברגע הזה השאירה
+      // רק .tmp שלם, ובלי שחזור המחשב היה מקבל פרופיל ריק חדש.
+      store.save(const SubsetProfile(id: 'lost', label: 'א', dbVersion: 9));
+      fileFor('lost').renameSync('${fileFor('lost').path}.tmp');
+      expect(store.load('lost')?.dbVersion, 9);
+      expect(filesInDir(), equals(['lost.json']));
+    });
+
+    test('load אינו משחזר מ-.tmp חתוך', () {
+      File('${fileFor('cut').path}.tmp').writeAsStringSync('{ "id": "cu');
+      expect(store.load('cut'), isNull);
     });
 
     test('הקובץ שנכתב הוא JSON תקין וקריא', () {

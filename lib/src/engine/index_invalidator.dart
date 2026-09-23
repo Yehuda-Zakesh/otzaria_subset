@@ -124,8 +124,29 @@ class OtzariaIndexInvalidator {
   /// [dryRun] מחזיר את מה שהיה נמחק בלי לגעת בדיסק — מה שה-UI מציג
   /// למשתמש לפני שהוא מאשר.
   ///
+  /// [protectedPaths] — קבצים שאסור שיימחקו יחד עם התיקייה (הספרייה
+  /// עצמה). תיקייה שמכילה אחד מהם אינה אינדקס, גם אם יש בה `meta.json`.
+  ///
   /// תיקייה שאינה קיימת אינה שגיאה: אין אינדקס, אין מה לבטל.
-  IndexInvalidationResult invalidate(String dir, {bool dryRun = false}) {
+  IndexInvalidationResult invalidate(
+    String dir, {
+    bool dryRun = false,
+    Iterable<String> protectedPaths = const [],
+  }) {
+    // נתיב יחסי נפתר מול תיקיית העבודה של התהליך, ושורש כונן הוא הכל —
+    // מחיקה רקורסיבית של אחד מהם אינה הפיכה.
+    if (!p.isAbsolute(dir) || p.equals(p.rootPrefix(dir), p.normalize(dir))) {
+      throw IndexInvalidationException(
+        'נתיב האינדקס אינו תיקייה מוחלטת שאפשר למחוק בבטחה: $dir',
+      );
+    }
+    for (final protected in protectedPaths) {
+      if (p.equals(dir, protected) || p.isWithin(dir, protected)) {
+        throw IndexInvalidationException(
+          'תיקיית האינדקס מכילה את $protected, ולכן לא נמחקה: $dir',
+        );
+      }
+    }
     final directory = Directory(dir);
     if (!directory.existsSync()) {
       return IndexInvalidationResult(
@@ -147,6 +168,13 @@ class OtzariaIndexInvalidator {
     var bytes = 0;
     for (final entity in directory.listSync(recursive: true)) {
       if (entity is! File) continue;
+      // ‏Tantivy אינו כותב את הספרייה לתוך האינדקס. מי שקורא ל-invalidate
+      // בלי [protectedPaths] עדיין מוגן מפני נתיב שמצביע על תיקיית הספרייה.
+      if (p.basename(entity.path).toLowerCase() == 'seforim.db') {
+        throw IndexInvalidationException(
+          'תיקיית האינדקס מכילה ספרייה (${entity.path}), ולכן לא נמחקה: $dir',
+        );
+      }
       files++;
       try {
         bytes += entity.lengthSync();

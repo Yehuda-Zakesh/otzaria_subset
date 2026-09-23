@@ -32,7 +32,16 @@ class FlowProgress {
   /// ‏0..1 כשהוא ידוע. `null` = שלב שאי אפשר למדוד את אורכו.
   final double? fraction;
 
-  const FlowProgress(this.stage, this.message, {this.fraction});
+  /// האם העבודה עברה את נקודת האל-חזור (מחיקה בפועל, החלפת הקובץ).
+  /// הריגת ה-`Isolate` מכאן הייתה משאירה מסד שהשתנה ופרופיל שלא עודכן.
+  final bool committing;
+
+  const FlowProgress(
+    this.stage,
+    this.message, {
+    this.fraction,
+    this.committing = false,
+  });
 }
 
 /// מה שהסתיים בזרימה — מה שהמסכים צריכים אחריה.
@@ -171,6 +180,10 @@ class SubsetUpdateFlow {
     int? estimatedBytes,
     bool Function()? isCancelled,
   }) async* {
+    // כלל ריק פירושו "לא נשאר אף ספר" — הגזימה הייתה מרוקנת את הספרייה.
+    if (spec.isEmpty) {
+      throw const FlowException('לא נשאר אף ספר בבחירה. אין מה לגזום.');
+    }
     Directory(workDir).createSync(recursive: true);
 
     // המסלול המהיר זמין רק על מסד שאנחנו בנינו — ראו SubsetPruner.
@@ -207,12 +220,14 @@ class SubsetUpdateFlow {
     )) {
       switch (event) {
         case JobStage(:final stage):
-          yield FlowProgress(FlowStage.rebuilding, stageLabel(stage));
-        case JobTable(:final table, :final rows):
           yield FlowProgress(
             FlowStage.rebuilding,
-            'מעתיק $table — $rows שורות',
+            stageLabel(stage),
+            committing: isPointOfNoReturn(stage),
           );
+        case JobTable():
+          // שם הטבלה פנימי (§13), וההתקדמות כבר מדווחת ב-JobBytes.
+          break;
         case JobFailed(:final message):
           throw FlowException(message);
         case JobDone(:final result):
@@ -263,11 +278,14 @@ class SubsetUpdateFlow {
     )) {
       switch (event) {
         case JobStage(:final stage):
-          yield FlowProgress(FlowStage.rebuilding, stageLabel(stage));
-        case JobTable(:final table, :final rows):
-          if (rows > 0) {
-            yield FlowProgress(FlowStage.rebuilding, 'מנקה $table');
-          }
+          yield FlowProgress(
+            FlowStage.rebuilding,
+            stageLabel(stage),
+            committing: isPointOfNoReturn(stage),
+          );
+        case JobTable():
+          // שם הטבלה פנימי (§13), וההתקדמות כבר מדווחת ב-JobBytes.
+          break;
         case JobBytes(:final done, :final total):
           yield _tableProgress(done, total);
         case JobIndex(:final done, :final total):
@@ -304,6 +322,16 @@ class SubsetUpdateFlow {
     required void Function(FlowOutcome outcome) onOutcome,
     bool Function()? isCancelled,
   }) async* {
+    // לפני גזימה ראשונה הכלל ריק, וכלל ריק שומר אפס ספרים: מסלול ה-patch
+    // היה מסנן החוצה כל טקסט, ובנייה מחדש הייתה מרוקנת את הספרייה המלאה.
+    final mutates = plan.kind == LibraryUpdatePlanKind.delta ||
+        plan.kind == LibraryUpdatePlanKind.fullDownload;
+    if (mutates && spec.isEmpty) {
+      throw const FlowException(
+        'עוד לא נמחקו ספרים מהספרייה, ולכן אין כאן מה לעדכן. '
+        'כל עוד הספרייה מלאה, אוצריא מעדכנת אותה בעצמה.',
+      );
+    }
     Directory(workDir).createSync(recursive: true);
     var current = profile;
     final pending = <int>{};
@@ -390,11 +418,11 @@ class SubsetUpdateFlow {
         final entry = edge.manifest.patchFiles.first;
         final url = edge.patchFileUrls[entry.file];
         if (url == null) {
-          throw FlowException('חסר נתיב להורדת ${entry.file}');
+          throw const FlowException('חסר קישור להורדת העדכון.');
         }
 
-        final label = 'עדכון ${i + 1} מתוך ${steps.length} '
-            '(${edge.fromVersion} ← ${edge.toVersion})';
+        // בלי מספרי גרסה ושם קובץ — אלה פרטים פנימיים (§13).
+        final label = 'עדכון ${i + 1} מתוך ${steps.length}';
         yield FlowProgress(FlowStage.downloading, '$label — מוריד…');
 
         final patchPath = await downloader.downloadAndExtract(
@@ -424,6 +452,7 @@ class SubsetUpdateFlow {
                 yield FlowProgress(
                   _stageOf(stage),
                   '$label — ${stageLabel(stage)}',
+                  committing: isPointOfNoReturn(stage),
                 );
               case JobFailed(:final message):
                 throw FlowException(message);
@@ -463,7 +492,7 @@ class SubsetUpdateFlow {
   }) async* {
     final asset = plan.fullDbAsset;
     if (asset == null) {
-      throw const FlowException('אין נכס של ספרייה מלאה בתכנון.');
+      throw const FlowException('לא נמצאה ספרייה להורדה.');
     }
     final fullPath = p.join(workDir, 'seforim-full.db');
 
@@ -472,10 +501,11 @@ class SubsetUpdateFlow {
     final needed =
         ZstdFileStream.contentSizeOf(asset.downloadUrl) ?? asset.size * 6;
     if (DiskSpaceProbe.isKnownInsufficient(workDir, needed)) {
+      // אין הגדרה לתיקיית עבודה — היא נגזרת ממיקום הספרייה — ולכן לא
+      // מפנים את המשתמש להגדרה שאינה קיימת.
       throw FlowException(
-        'אין מספיק מקום פנוי ב-$workDir. נדרשים לפחות '
-        '${(needed / (1 << 30)).toStringAsFixed(1)}GB זמניים לבנייה מחדש. '
-        'אפשר להפנות את תיקיית העבודה לדיסק חיצוני בהגדרות.',
+        'אין מספיק מקום פנוי בכונן של הספרייה. נדרשים לפחות '
+        '${(needed / (1 << 30)).toStringAsFixed(1)}GB פנויים זמנית.',
       );
     }
 
@@ -491,7 +521,9 @@ class SubsetUpdateFlow {
             throw FlowException('ההורדה נכשלה (קוד ${response.statusCode}).');
           }
           await decompressStreamToFile(
-            response.stream,
+            // חיבור שנתקע אינו מסתיים לעולם, ובלי מנה חדשה גם הביטול אינו
+            // נבדק — המסך היה נתקע בלי דרך החוצה.
+            response.stream.timeout(const Duration(minutes: 2)),
             fullPath,
             isCancelled: isCancelled,
           );
@@ -506,11 +538,11 @@ class SubsetUpdateFlow {
           isCancelled: isCancelled,
         );
         if (!streamed) {
-          throw const FlowException('פירוק zstd בהזרמה אינו זמין כאן.');
+          throw const FlowException('פתיחת קובץ הספרייה אינה זמינה במחשב זה.');
         }
       }
 
-      yield const FlowProgress(FlowStage.rebuilding, 'בונה ספרייה חלקית…');
+      yield const FlowProgress(FlowStage.rebuilding, 'בונה את הספרייה…');
       await for (final event in runJob(
         rebuildEntry,
         RebuildArgs(
@@ -522,12 +554,14 @@ class SubsetUpdateFlow {
       )) {
         switch (event) {
           case JobStage(:final stage):
-            yield FlowProgress(FlowStage.rebuilding, stageLabel(stage));
-          case JobTable(:final table, :final rows):
             yield FlowProgress(
               FlowStage.rebuilding,
-              'מעתיק $table — $rows שורות',
+              stageLabel(stage),
+              committing: isPointOfNoReturn(stage),
             );
+          case JobTable():
+            // שם הטבלה פנימי (§13), וההתקדמות כבר מדווחת ב-JobBytes.
+            break;
           case JobFailed(:final message):
             throw FlowException(message);
           case JobDone(:final result):
@@ -574,6 +608,16 @@ class SubsetUpdateFlow {
 }
 
 /// שמות השלבים של המנוע בעברית, לתצוגה.
+/// שלבי מנוע שמהם ואילך ביטול אינו בטוח: מחיקה במקום (בתוך transaction
+/// פתוחה), החלפת הקובץ וביטול האינדקס שאחריה.
+bool isPointOfNoReturn(String stage) => const {
+      'delete',
+      'reclaim',
+      'swap',
+      'invalidateIndex',
+      'cleanup',
+    }.contains(stage);
+
 String stageLabel(String stage) => switch (stage) {
       'verifyLocal' => 'מאמת את הספרייה הקיימת',
       'filter' => 'מסנן את העדכון לבחירה',
@@ -592,7 +636,10 @@ String stageLabel(String stage) => switch (stage) {
       'delete' => 'מוחק ספרים',
       'reclaim' => 'משחרר מקום',
       'cleanup' => 'מנקה',
-      _ => stage,
+      'build' => 'בונה את הספרייה',
+      'stage' => 'מכין עותק לעבודה',
+      // שם שלב שלא תורגם הוא מונח פנימי באנגלית — לא מציגים אותו (§13).
+      _ => 'עובד…',
     };
 
 /// פירוק חד-פעמי, ל-patches בלבד — הם עשרות מגהבייטים ונכנסים לזיכרון.

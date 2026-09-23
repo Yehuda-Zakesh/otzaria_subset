@@ -77,6 +77,11 @@ class AppState extends ChangeNotifier {
     final boundId = registry.profileIdFor(identity);
     final existing = boundId == null ? null : _profileStore.load(boundId);
     if (existing != null) {
+      // התאמה שנפלה לשם המחשב (המזהה המתמיד אבד) נרשמת מחדש תחת המזהה,
+      // אחרת שינוי שם עתידי של המחשב היה מאבד את הפרופיל.
+      if (registry.allBindings()[identity.id] != existing.id) {
+        registry.bind(identity, existing.id);
+      }
       _profile = existing;
       return;
     }

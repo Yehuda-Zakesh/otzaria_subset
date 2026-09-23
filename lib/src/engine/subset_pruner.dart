@@ -116,10 +116,8 @@ class SubsetPruner {
         keepCategoryIds: keepCategoryIds,
         onTable: onTable,
         onTableStart: onTableStart,
+        onVerify: () => onStage?.call('verify'),
       );
-
-      onStage?.call('verify');
-      _verify(db);
 
       // שחרור הדפים הפנויים לדיסק. בלעדיו הקובץ נשאר בגודלו המלא וכל
       // התרגיל לא נתן למשתמש כלום.
@@ -151,6 +149,7 @@ class SubsetPruner {
     Set<int>? keepCategoryIds,
     void Function(String table, int rows)? onTable,
     void Function(String table, int index, int total)? onTableStart,
+    void Function()? onVerify,
   }) {
     final counts = <String, int>{};
     final total = kTableScopesInFkOrder.length;
@@ -174,6 +173,10 @@ class SubsetPruner {
         counts[scope.name] = n;
         onTable?.call(scope.name, n);
       }
+      // האימות **לפני** ה-COMMIT: אחריו אין לאן לגלגל, והמסד היה נשאר
+      // שבור על הדיסק למרות ההודעה שהוא "גולגל אחורה".
+      onVerify?.call();
+      _verify(db);
       db.execute('COMMIT');
     } catch (_) {
       try {
@@ -221,9 +224,10 @@ class SubsetPruner {
     }
   }
 
+  /// ‏`foreign_key_check` בודק גם כשאכיפת המפתחות כבויה, ולכן הוא רץ
+  /// בתוך הטרנזקציה, שם `PRAGMA foreign_keys` אינו ניתן לשינוי.
   void _verify(sqlite3.Database db) {
-    db.execute('PRAGMA foreign_keys = ON');
-    final violations = db.select('PRAGMA foreign_key_check');
+    final violations = db.select('PRAGMA main.foreign_key_check');
     if (violations.isNotEmpty) {
       throw SubsetPruneException(
         'הגזימה השאירה ${violations.length} הפרות מפתח זר. המסד גולגל '

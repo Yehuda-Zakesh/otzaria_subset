@@ -112,7 +112,8 @@ class AppSettingsStore {
       const JsonEncoder.withIndent('  ').convert(settings.toJson()),
       flush: true,
     );
-    if (file.existsSync()) file.deleteSync();
+    // ‏rename מחליף קובץ קיים גם ב-Windows. מחיקה לפניו פתחה חלון שבו
+    // קריסה משאירה בלי הגדרות בכלל — בדיוק מה שהכתיבה האטומית באה למנוע.
     tmp.renameSync(file.path);
   }
 }

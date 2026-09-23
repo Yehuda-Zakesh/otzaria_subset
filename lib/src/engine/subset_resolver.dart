@@ -171,11 +171,12 @@ class SubsetResolver {
         }
       }
 
-      final split = _splitByAvailability(subsetDb, ids);
+      final context = _categoryContext(subsetDb);
+      final split = _splitByAvailability(subsetDb, ids, context);
       return PatchKeepResolution(
         keep: split.keep,
         pendingAcquisition: split.pendingAcquisition,
-        keepCategories: _effectiveCategories(subsetDb, spec, split.keep),
+        keepCategories: _effectiveCategories(spec, split.keep, context),
       );
     } finally {
       try {
@@ -184,16 +185,9 @@ class SubsetResolver {
     }
   }
 
-  /// הקטגוריות שנשמרות, מחושבות מול המצב **שאחרי** ה-patch.
-  ///
-  /// חייב להיות הסגור האפקטיבי ולא המקומי: patch שמוסיף תת-קטגוריה
-  /// לקטגוריה שנבחרה חייב להכניס גם אותה, אחרת ספר שיגיע לשם בעדכון הבא
-  /// לא ייפתר. ה-`praw` מחובר כבר על ידי [resolveForPatch].
-  Set<int> _effectiveCategories(
-    sqlite3.Database db,
-    SubsetSpec spec,
-    Set<int> bookIds,
-  ) {
+  /// עץ הקטגוריות **שאחרי** ה-patch, כפי שהוא נראה מהמסד החלקי. ה-`praw`
+  /// מחובר כבר על ידי [resolveForPatch].
+  _CategoryContext _categoryContext(sqlite3.Database db) {
     final descendantsOf = <int, Set<int>>{};
     final ancestorsOf = <int, Set<int>>{};
 
@@ -221,18 +215,65 @@ class SubsetResolver {
             'SELECT id, categoryId FROM main.book '
             'WHERE id NOT IN (SELECT id FROM praw.upsert_book)'
         : 'SELECT id, categoryId FROM main.book';
+    final categoryOf = <int, int>{
+      for (final row in db.select(booksSql))
+        row['id'] as int: row['categoryId'] as int,
+    };
 
-    final keep = <int>{};
-    for (final row in db.select(booksSql)) {
-      if (!bookIds.contains(row['id'] as int)) continue;
-      final cat = row['categoryId'] as int;
+    // שורות `category` שיהיו במסד אחרי ההחלה: המקומיות ומה שה-patch
+    // מביא, פחות מה שהוא מוחק.
+    final local = {
+      for (final row in db.select('SELECT id FROM main.category'))
+        row['id'] as int,
+    };
+    final available = {...local};
+    if (_has(db, 'praw', 'upsert_category')) {
+      for (final row in db.select('SELECT id FROM praw.upsert_category')) {
+        available.add(row['id'] as int);
+      }
+    }
+    if (_has(db, 'praw', 'delete_category')) {
+      for (final row in db.select('SELECT id FROM praw.delete_category')) {
+        final id = row['id'] as int;
+        available.remove(id);
+        local.remove(id);
+      }
+    }
+
+    return _CategoryContext(
+      descendantsOf: descendantsOf,
+      ancestorsOf: ancestorsOf,
+      categoryOf: categoryOf,
+      survivingLocal: local,
+      available: available,
+    );
+  }
+
+  /// הקטגוריות שנשמרות, מחושבות מול המצב **שאחרי** ה-patch.
+  ///
+  /// חייב להיות הסגור האפקטיבי ולא המקומי: patch שמוסיף תת-קטגוריה
+  /// לקטגוריה שנבחרה חייב להכניס גם אותה, אחרת ספר שיגיע לשם בעדכון הבא
+  /// לא ייפתר.
+  ///
+  /// **כולל כל קטגוריה מקומית שה-patch אינו מוחק.** המסנן אינו מוחק
+  /// קטגוריות, ולכן קטגוריה שהתרוקנה נשארת במסד; קבוצה בלעדיה הייתה
+  /// מתארת מסד אחר מזה שעל הדיסק ושוברת את השקילות (§4 ב-AGENTS.md).
+  Set<int> _effectiveCategories(
+    SubsetSpec spec,
+    Set<int> bookIds,
+    _CategoryContext context,
+  ) {
+    final keep = <int>{...context.survivingLocal};
+    for (final id in bookIds) {
+      final cat = context.categoryOf[id];
+      if (cat == null) continue;
       keep.add(cat);
-      keep.addAll(ancestorsOf[cat] ?? const <int>{});
+      keep.addAll(context.ancestorsOf[cat] ?? const <int>{});
     }
     for (final selected in spec.categoryIds) {
       keep.add(selected);
-      keep.addAll(descendantsOf[selected] ?? const <int>{});
-      keep.addAll(ancestorsOf[selected] ?? const <int>{});
+      keep.addAll(context.descendantsOf[selected] ?? const <int>{});
+      keep.addAll(context.ancestorsOf[selected] ?? const <int>{});
     }
     return keep;
   }
@@ -250,8 +291,16 @@ class SubsetResolver {
   /// כל השאר הוא ספר שהיה קיים באוצריא מזמן ורק עכשיו נכנס לבחירה. אין
   /// דרך להשיג את תוכנו מ-patch, ולכן הוא ממתין להבאה ממסד מלא ולא נכנס
   /// לתת-הקבוצה חצי-ריק.
+  ///
+  /// בנוסף, הקטגוריה שהספר יושב בה אחרי ה-patch, ואבותיה, חייבות להיות
+  /// זמינות. בעץ גזום ספר יכול לעבור לקטגוריה שנגזמה ושה-patch אינו נושא
+  /// (היא לא השתנתה באפסטרים) — הכנסתו הייתה מפרה מפתח זר, ולכן גם הוא
+  /// ממתין להבאה.
   PatchKeepResolution _splitByAvailability(
-      sqlite3.Database db, Set<int> candidates) {
+    sqlite3.Database db,
+    Set<int> candidates,
+    _CategoryContext context,
+  ) {
     if (candidates.isEmpty) {
       return const PatchKeepResolution(keep: {});
     }
@@ -280,10 +329,20 @@ class SubsetResolver {
 
     final keep = <int>{};
     final pending = <int>{};
+    bool categoryAvailable(int id) {
+      final cat = context.categoryOf[id];
+      // ספר שאינו מקומי ואינו ב-patch — אין מה לבדוק; הוא ממתין בכל מקרה.
+      if (cat == null) return true;
+      return context.available.contains(cat) &&
+          (context.ancestorsOf[cat] ?? const <int>{})
+              .every(context.available.contains);
+    }
+
     for (final id in candidates) {
-      if (local.contains(id) ||
-          suppliedByPatch.contains(id) ||
-          emptyBooks.contains(id)) {
+      if ((local.contains(id) ||
+              suppliedByPatch.contains(id) ||
+              emptyBooks.contains(id)) &&
+          categoryAvailable(id)) {
         keep.add(id);
       } else {
         pending.add(id);
@@ -428,6 +487,28 @@ class SubsetResolver {
         ),
     ];
   }
+}
+
+class _CategoryContext {
+  final Map<int, Set<int>> descendantsOf;
+  final Map<int, Set<int>> ancestorsOf;
+
+  /// הקטגוריה של כל ספר, מקומי או מה-patch, אחרי ההחלה.
+  final Map<int, int> categoryOf;
+
+  /// קטגוריות מקומיות שה-patch אינו מוחק.
+  final Set<int> survivingLocal;
+
+  /// קטגוריות שתהיה להן שורה אחרי ההחלה.
+  final Set<int> available;
+
+  const _CategoryContext({
+    required this.descendantsOf,
+    required this.ancestorsOf,
+    required this.categoryOf,
+    required this.survivingLocal,
+    required this.available,
+  });
 }
 
 class _SizeCalibration {

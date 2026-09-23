@@ -251,6 +251,34 @@ void main() {
       expect(SubsetPruner.supportsInPlace(at('plain.db')), false);
     });
 
+    test('גיזום שמשאיר הפרות מפתח זר מגולגל אחורה ולא נשמר', () {
+      buildFullDb(at('full.db'));
+      const SubsetBuilder().build(
+        sourcePath: at('full.db'),
+        targetPath: at('sub.db'),
+        bookIds: {1, 2},
+      );
+      final categoriesBefore =
+          on(at('sub.db'), (db) => rowCountOf(db, 'category'));
+
+      // קטגוריה 10 נושאת את הספרים שנשארים; גיזומה משאיר את
+      // `book.categoryId` מצביע לשורה חסרה.
+      expect(
+        () => const SubsetPruner().prune(
+          path: at('sub.db'),
+          dropBookIds: {},
+          keepCategoryIds: {1},
+        ),
+        throwsA(isA<SubsetPruneException>()),
+      );
+
+      on(at('sub.db'), (db) {
+        expect(rowCountOf(db, 'category'), categoriesBefore,
+            reason: 'ההודעה מבטיחה שהמסד גולגל אחורה — חייב להיות כך');
+        expect(db.select('PRAGMA foreign_key_check'), isEmpty);
+      });
+    });
+
     test('גיזום מסד שאינו קיים -> זריקה', () {
       expect(
         () => const SubsetPruner().prune(

@@ -15,7 +15,13 @@ Future<void> main() async {
   final state = AppState(store);
   // האיתור קורא קופסת Hive וקבצים — אסינכרוני, ולכן לפני ה-runApp
   // כדי שהמסך הראשון כבר יידע אם נמצאה ספרייה.
-  await state.relocate();
+  try {
+    await state.relocate();
+  } catch (error, stack) {
+    // כשל כאן היה נבלע ב-PlatformDispatcher.onError, ו-runApp לא היה רץ
+    // לעולם — חלון ריק בלי שום הסבר. עדיף לעלות כ"ספרייה לא נמצאה".
+    ErrorLog.instance.recordError(error, stack);
+  }
   runApp(SubsetApp(state: state));
 }
 
