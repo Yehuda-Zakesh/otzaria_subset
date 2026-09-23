@@ -40,8 +40,8 @@ class AppRelease {
 ///
 /// ## למה זה יכול להחליף את עצמו בלי הרשאות מנהל
 ///
-/// ההפצה ניידת: `installer/otzaria_subset.iss` פורש תיקייה ליד ה-EXE
-/// במקום להתקין ל-Program Files. לכן ההחלפה היא כתיבה לתיקייה של
+/// אין התקנה: ה-EXE שמתפרסם (`installer/stub/stub.cpp`) פורש תיקייה
+/// לצדו במקום להתקין ל-Program Files. לכן ההחלפה היא כתיבה לתיקייה של
 /// המשתמש, ואין UAC שקופץ בכל גרסה.
 class AppUpdater {
   final Duration timeout;
@@ -129,16 +129,17 @@ class AppUpdater {
     await _handOff(file.path);
   }
 
-  /// מפעיל את הפורש על תיקיית ההרצה הנוכחית ויוצא.
+  /// מפעיל את ה-EXE החדש במצב עדכון ויוצא.
   ///
   /// ‏`detached` חובה: תהליך הבן חייב לשרוד את מותנו, שהרי הוא זה
-  /// שמחליף אותנו. `/DIR` מצביע על התיקייה שאנחנו רצים ממנה, כדי
-  /// שהעדכון ינחת בדיוק במקום שהמשתמש פרש אליו ולא במקום אחר.
-  Future<void> _handOff(String setupPath) async {
+  /// שמחליף אותנו. ה-pid שלנו עובר אליו כדי שימתין שניסגר לפני
+  /// שיכתוב — כל עוד אנחנו רצים הקבצים נעולים. התיקייה היא זו שאנחנו
+  /// רצים ממנה, כדי שהעדכון ינחת בדיוק במקום שהמשתמש פרש אליו.
+  Future<void> _handOff(String deployerPath) async {
     final appDir = p.dirname(Platform.resolvedExecutable);
     await Process.start(
-      setupPath,
-      ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR=$appDir'],
+      deployerPath,
+      ['--update', '$pid', appDir],
       mode: ProcessStartMode.detached,
     );
     exit(0);

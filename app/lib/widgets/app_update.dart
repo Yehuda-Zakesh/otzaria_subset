@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/app_updater.dart';
 import '../theme.dart';
 import 'format.dart';
+import 'icon_badge.dart';
 
 /// הודעה על גרסה חדשה של **התוכנה**.
 ///
@@ -22,22 +23,16 @@ class AppUpdateCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Card(
-        color: AppColors.accent.withValues(alpha: 0.08),
+  Widget build(BuildContext context) => TintedCard(
+        color: AppColors.accent,
+        soft: AppColors.accentSoft,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.system_update_alt_rounded,
-                  color: AppColors.accent,
-                ),
+              const IconBadge(
+                icon: Icons.system_update_alt_rounded,
+                color: AppColors.accent,
               ),
               const SizedBox(width: 16),
               Expanded(

@@ -24,10 +24,13 @@ Future<bool> showDisclaimerDialog(BuildContext context) async {
       icon: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppColors.warm.withValues(alpha: 0.16),
+          color: AppTheme.tint(context, AppColors.warm, AppColors.warmSoft),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Icon(Icons.info_outline_rounded, color: AppColors.warm),
+        child: Icon(
+          Icons.info_outline_rounded,
+          color: AppTheme.readable(context, AppColors.warm),
+        ),
       ),
       title: const Text('לפני שמתחילים'),
       content: const SizedBox(

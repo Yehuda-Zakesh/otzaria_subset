@@ -98,25 +98,13 @@ jobs:
           --dart-define=APP_VERSION=${{ steps.bump-version.outputs.version }}
           --split-debug-info=build\symbols
 
-      - name: Ensure Inno Setup is installed
+      # קובץ ההפצה: EXE אחד שפורש תיקייה אחת לצדו ומפעיל אותה. אין
+      # כאן שום כלי התקנה להתקין — הסקריפט בונה stub זעיר עם ה-CMake
+      # של Visual Studio, דוחס את פלט Flutter ב-7-Zip (שניהם כבר על
+      # ה-runner), ומדביק. אותו קובץ בדיוק הוא מה שהעדכון העצמי מוריד.
+      - name: Build single-file deployer
         shell: pwsh
-        run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --no-progress -y
-          }
-          if (-not (Test-Path $iscc)) {
-            throw "ISCC.exe not found at $iscc after installing Inno Setup"
-          }
-
-      # אריזה לקובץ הפצה יחיד: EXE שפורש תיקייה אחת לידו ומפעיל אותה.
-      # אותו קובץ בדיוק הוא גם מה שהעדכון העצמי מוריד ומריץ בשקט.
-      - name: Build portable deployer (Inno Setup)
-        shell: pwsh
-        run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc "/DMyAppVersion=${{ steps.bump-version.outputs.version }}" "installer\otzaria_subset.iss"
-          if ($LASTEXITCODE -ne 0) { throw "ISCC נכשל עם קוד יציאה $LASTEXITCODE" }
+        run: ./installer/build.ps1 -Version ${{ steps.bump-version.outputs.version }}
 
       - name: Commit version bump and tag
         shell: pwsh

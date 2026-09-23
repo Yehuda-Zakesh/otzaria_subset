@@ -174,17 +174,14 @@ class _SummaryBar extends StatelessWidget {
         ? 0
         : (currentBytes - current.estimatedBytes).clamp(0, currentBytes);
 
+    final surfaces = AppSurfaces.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, -6),
-          ),
-        ],
+        color: surfaces.panel,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        // קו הפרדה במקום צל שחור: הפס יושב מעל רשימה לבנה, וצל כהה
+        // מתחתיו היה הכתם הכהה היחיד במסך.
+        border: Border(top: BorderSide(color: surfaces.panelBorder)),
       ),
       padding: const EdgeInsets.fromLTRB(28, 18, 28, 18),
       child: Row(
@@ -208,7 +205,9 @@ class _SummaryBar extends StatelessWidget {
                     current == null
                         ? 'מחשב כמה מקום יתפנה…'
                         : 'יתפנו בערך ${formatBytes(freed)}',
-                    style: const TextStyle(color: AppColors.accent),
+                    style: TextStyle(
+                      color: AppTheme.readable(context, AppColors.accent),
+                    ),
                   ),
                 if (current != null && current.hasSeveredLinks)
                   _SeveredNotice(plan: current),
@@ -294,7 +293,7 @@ class _SeveredNotice extends StatelessWidget {
         ),
         child: Text(
           '${formatCount(plan.severedLinkCount)} קישורים לא יעבדו — לפרטים',
-          style: const TextStyle(color: AppColors.warm),
+          style: TextStyle(color: AppTheme.readable(context, AppColors.warm)),
         ),
       );
 }

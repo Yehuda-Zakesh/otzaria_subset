@@ -43,10 +43,13 @@ class _ErrorReportDialogState extends State<_ErrorReportDialog> {
       icon: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppColors.warm.withValues(alpha: 0.16),
+          color: AppTheme.tint(context, AppColors.warm, AppColors.warmSoft),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Icon(Icons.bug_report_rounded, color: AppColors.warm),
+        child: Icon(
+          Icons.bug_report_rounded,
+          color: AppTheme.readable(context, AppColors.warm),
+        ),
       ),
       title: const Text('דיווח על תקלה'),
       content: SizedBox(

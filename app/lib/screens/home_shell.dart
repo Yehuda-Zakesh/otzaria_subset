@@ -11,6 +11,7 @@ import '../services/app_updater.dart';
 import '../services/error_report.dart';
 import '../services/otzaria_install.dart';
 import '../services/update_flow.dart';
+import '../theme.dart';
 import '../widgets/app_update.dart';
 import '../widgets/disclaimer.dart';
 import '../widgets/update_guard.dart';
@@ -303,55 +304,35 @@ class _HomeShellState extends State<HomeShell> {
         _flowError == null &&
         _progress?.stage != FlowStage.done;
 
+    final surfaces = AppSurfaces.of(context);
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFF7F5FD),
-              Color(0xFFF2F1FB),
-              Color(0xFFF5FAFF),
-            ],
+      // רקע אחיד. קודם היה כאן גרדיאנט שנסחף לכחלחל, ועל רקע נייח
+      // קל יותר לראות שהמשטח הלבן הוא שכבה נפרדת.
+      backgroundColor: surfaces.canvas,
+      body: Row(
+        children: [
+          _Sidebar(
+            current: _view,
+            enabled: !busy,
+            onSelect: (view) => setState(() => _view = view),
           ),
-        ),
-        child: Row(
-          children: [
-            _Sidebar(
-              current: _view,
-              enabled: !busy,
-              onSelect: (view) => setState(() => _view = view),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 18, 18, 18),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(30),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFCFBFF),
-                      border: Border.all(
-                        color: const Color(0xFFE7E0FB),
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color:
-                              const Color(0xFF2B2147).withValues(alpha: 0.06),
-                          blurRadius: 24,
-                          spreadRadius: 0,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: _body(),
-                  ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(0, 18, 18, 18),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: surfaces.panel,
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: surfaces.panelBorder),
+                  boxShadow: AppShadows.soft,
                 ),
+                clipBehavior: Clip.antiAlias,
+                child: _body(),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -377,10 +358,12 @@ class _HomeShellState extends State<HomeShell> {
       };
 }
 
-/// סרגל צד עם גרדיאנט.
+/// סרגל צד משלנו, בגוון אינדיגו רך.
 ///
 /// ‏`NavigationRail` הסטנדרטי נראה כמו כל אפליקציית Material, וכאן דווקא
-/// חשוב שהתוכנה לא תתבלבל עם אוצריא — ראו `AppColors`.
+/// חשוב שהתוכנה לא תתבלבל עם אוצריא — ראו `AppColors`. הזהות באה מהגוון
+/// ולא מכהות: סרגל כמעט־שחור על רקע כמעט־לבן משך את העין יותר מהתוכן
+/// עצמו, והרי הוא רק ניווט.
 class _Sidebar extends StatelessWidget {
   final _View current;
   final bool enabled;
@@ -399,94 +382,81 @@ class _Sidebar extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: 170,
-        margin: const EdgeInsets.fromLTRB(18, 18, 0, 18),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              const Color(0xFF3E2D78).withValues(alpha: 0.97),
-              const Color(0xFF1F1B36).withValues(alpha: 0.98),
-              const Color(0xFF151826).withValues(alpha: 0.98),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1A1530).withValues(alpha: 0.24),
-              blurRadius: 28,
-              offset: const Offset(0, 14),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.auto_stories_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
+  Widget build(BuildContext context) {
+    final surfaces = AppSurfaces.of(context);
+    return Container(
+      width: 170,
+      margin: const EdgeInsets.fromLTRB(18, 18, 0, 18),
+      decoration: BoxDecoration(
+        color: surfaces.rail,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: surfaces.railBorder),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: AppTheme.hero(context),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                const SizedBox(height: 18),
-                Text(
-                  'ספרייה',
+                child: const Icon(
+                  Icons.auto_stories_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'ספרייה',
+                style: TextStyle(
+                  color: surfaces.railInk,
+                  fontSize: 12,
+                  letterSpacing: 0.2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 18),
+              for (final item in _items)
+                _SidebarItem(
+                  icon: item.icon,
+                  label: item.label,
+                  // מסך ההתקדמות אינו יעד בפני עצמו — הוא מוצג במקום
+                  // "הספרייה", ולכן זה מה שנראה מסומן.
+                  selected: current == item.view ||
+                      (item.view == _View.home && current == _View.progress),
+                  onTap: enabled ? () => onSelect(item.view) : null,
+                ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppTheme.tint(
+                    context,
+                    AppColors.accent,
+                    AppColors.accentSoft,
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'עדכון מבוקר',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    letterSpacing: 0.2,
+                    color: AppTheme.readable(context, AppColors.accent),
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 18),
-                for (final item in _items)
-                  _SidebarItem(
-                    icon: item.icon,
-                    label: item.label,
-                    // מסך ההתקדמות אינו יעד בפני עצמו — הוא מוצג במקום
-                    // "הספרייה", ולכן זה מה שנראה מסומן.
-                    selected: current == item.view ||
-                        (item.view == _View.home && current == _View.progress),
-                    onTap: enabled ? () => onSelect(item.view) : null,
-                  ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                  ),
-                  child: const Text(
-                    'עדכון מבוקר',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _SidebarItem extends StatelessWidget {
@@ -503,39 +473,42 @@ class _SidebarItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Material(
-          color: selected
-              ? Colors.white.withValues(alpha: 0.19)
-              : Colors.transparent,
+  Widget build(BuildContext context) {
+    final surfaces = AppSurfaces.of(context);
+    // הנבחר מסומן בגוון ובמשקל גופן, לא בהיפוך צבעים — הבדל עדין מספיק
+    // כדי לראות היכן אנחנו, בלי כתם כהה שקופץ מהסרגל.
+    final ink = selected ? surfaces.railInkSelected : surfaces.railInk;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Material(
+        color: selected ? surfaces.railSelected : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(18),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
-              child: Opacity(
-                opacity: onTap == null ? 0.45 : 1,
-                child: Column(
-                  children: [
-                    Icon(icon, color: Colors.white, size: 24),
-                    const SizedBox(height: 7),
-                    Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12.5,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
-                      ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+            child: Opacity(
+              opacity: onTap == null ? 0.4 : 1,
+              child: Column(
+                children: [
+                  Icon(icon, color: ink, size: 24),
+                  const SizedBox(height: 7),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: ink,
+                      fontSize: 12.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }

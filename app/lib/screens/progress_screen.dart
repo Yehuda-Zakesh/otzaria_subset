@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/update_flow.dart';
 import '../theme.dart';
+import '../widgets/icon_badge.dart';
 
 /// מסך התקדמות לפעולה ארוכה.
 ///
@@ -152,7 +153,7 @@ class _StepTrack extends StatelessWidget {
                     color: i < reached || finished
                         ? scheme.primary
                         : i == reached
-                            ? AppColors.accent
+                            ? AppTheme.readable(context, AppColors.accent)
                             : scheme.outline,
                   ),
                 ),
@@ -178,7 +179,11 @@ class _StepDot extends StatelessWidget {
       return CircleAvatar(
         radius: 13,
         backgroundColor: scheme.primary,
-        child: const Icon(Icons.check_rounded, size: 16, color: Colors.white),
+        child: Icon(
+          Icons.check_rounded,
+          size: 16,
+          color: scheme.onPrimary,
+        ),
       );
     }
     if (active) {
@@ -187,10 +192,11 @@ class _StepDot extends StatelessWidget {
         height: 26,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: AppColors.accent,
+          color: AppTheme.readable(context, AppColors.accent),
           boxShadow: [
             BoxShadow(
-              color: AppColors.accent.withValues(alpha: 0.45),
+              color: AppTheme.readable(context, AppColors.accent)
+                  .withValues(alpha: 0.28),
               blurRadius: 10,
               spreadRadius: 2,
             ),
@@ -216,28 +222,22 @@ class _ErrorCard extends StatelessWidget {
   const _ErrorCard({required this.message});
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: scheme.error.withValues(alpha: 0.08),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: scheme.error.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(14),
+  Widget build(BuildContext context) => TintedCard(
+        color: AppColors.danger,
+        soft: AppColors.dangerSoft,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const IconBadge(
+                icon: Icons.error_outline_rounded,
+                color: AppColors.danger,
               ),
-              child: Icon(Icons.error_outline_rounded, color: scheme.error),
-            ),
-            const SizedBox(width: 16),
-            Expanded(child: Text(message)),
-          ],
+              const SizedBox(width: 16),
+              Expanded(child: Text(message)),
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
 }

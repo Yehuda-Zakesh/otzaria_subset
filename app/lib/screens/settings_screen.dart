@@ -10,6 +10,7 @@ import '../state/app_settings.dart';
 import '../theme.dart';
 import '../widgets/disclaimer.dart';
 import '../widgets/error_report.dart';
+import '../widgets/icon_badge.dart';
 import '../widgets/update_guard.dart';
 
 /// הגדרות. שתי שאלות בלבד — כל השאר נגזר.
@@ -36,7 +37,7 @@ class SettingsScreen extends StatelessWidget {
                   children: [
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const _IconBadge(
+                      leading: const IconBadge(
                         icon: Icons.folder_rounded,
                         color: AppColors.seed,
                       ),
@@ -59,7 +60,7 @@ class SettingsScreen extends StatelessWidget {
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         dense: true,
-                        leading: _IconBadge(
+                        leading: IconBadge(
                           icon: Icons.restore_rounded,
                           color: Theme.of(context).colorScheme.outline,
                         ),
@@ -84,7 +85,7 @@ class SettingsScreen extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        const _IconBadge(
+                        const IconBadge(
                           icon: Icons.sync_rounded,
                           color: AppColors.accent,
                         ),
@@ -120,7 +121,7 @@ class SettingsScreen extends StatelessWidget {
                     if (settings.updateSource == UpdateSource.folder)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const _IconBadge(
+                        leading: const IconBadge(
                           icon: Icons.folder_open_rounded,
                           color: AppColors.accent,
                         ),
@@ -147,7 +148,7 @@ class SettingsScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const _IconBadge(
+                  leading: const IconBadge(
                     icon: Icons.bug_report_rounded,
                     color: AppColors.warm,
                   ),
@@ -217,23 +218,5 @@ class _VersionLine extends StatelessWidget {
                 color: Theme.of(context).colorScheme.outline,
               ),
         ),
-      );
-}
-
-/// תג אייקון קטן וצבעוני, כמו ב-[HomeScreen] — מסמן ויזואלית מה הסעיף.
-class _IconBadge extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-
-  const _IconBadge({required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Icon(icon, color: color),
       );
 }

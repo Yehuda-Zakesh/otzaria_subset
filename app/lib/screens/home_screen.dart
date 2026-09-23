@@ -7,6 +7,7 @@ import '../services/app_updater.dart';
 import '../theme.dart';
 import '../widgets/app_update.dart';
 import '../widgets/format.dart';
+import '../widgets/icon_badge.dart';
 import '../widgets/update_guard.dart';
 
 /// מסך הפתיחה. מראה שלושה דברים ותו לא: כמה ספרים, כמה מקום, ומה המצב.
@@ -116,27 +117,11 @@ class _Hero extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              const Color(0xFF4E3BC0).withValues(alpha: 0.98),
-              const Color(0xFF2D2555).withValues(alpha: 0.98),
-              const Color(0xFF1C1A33).withValues(alpha: 0.98),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(32),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF281D4D).withValues(alpha: 0.28),
-              blurRadius: 30,
-              spreadRadius: 0,
-              offset: const Offset(0, 18),
-            ),
-          ],
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.08),
-          ),
+          // הגרדיאנט של הפלטה, בטון־ביניים. זה המשטח הצבעוני **היחיד**
+          // במסך, וזו הסיבה שהוא עדיין נקרא כמוקד בלי להיות כמעט־שחור.
+          gradient: AppTheme.hero(context),
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: AppShadows.strong,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,11 +131,8 @@ class _Hero extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.14),
+                    color: Colors.white.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12),
-                    ),
                   ),
                   child: const Icon(
                     Icons.auto_stories_rounded,
@@ -159,10 +141,10 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'הספרייה שלך',
                   style: TextStyle(
-                    color: Colors.white70,
+                    color: Colors.white.withValues(alpha: 0.82),
                     fontSize: 17,
                     fontWeight: FontWeight.w600,
                   ),
@@ -228,7 +210,7 @@ class _Pill extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: strong ? 0.32 : 0.18),
+          color: Colors.white.withValues(alpha: strong ? 0.26 : 0.15),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
@@ -302,16 +284,9 @@ class _PendingCard extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.warm.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.schedule_rounded,
-                  color: AppColors.warm,
-                ),
+              const IconBadge(
+                icon: Icons.schedule_rounded,
+                color: AppColors.warm,
               ),
               const SizedBox(width: 16),
               Expanded(

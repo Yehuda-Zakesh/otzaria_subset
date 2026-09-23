@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria_subset/otzaria_subset.dart';
 
+import '../theme.dart';
+import 'icon_badge.dart';
+
 /// ההנחיה המדויקת, לפי מסך ההגדרות של אוצריא.
 const String kHowToDisable = 'באוצריא: הגדרות ← מערכת ← "עדכוני מערכת" ← '
     'לכבות את "עדכוני תוכנה וספרים". לחלופין לכבות רק את "סינכרון הספרייה '
@@ -31,7 +34,8 @@ class UpdateGuardBanner extends StatelessWidget {
     if (current.isDisabled) {
       return _tile(
         context,
-        color: Colors.green,
+        color: AppColors.ok,
+        soft: AppColors.okSoft,
         icon: Icons.verified_user_rounded,
         title: 'הכול מוגן',
         body: 'כדאי לבדוק שוב אחרי כל עדכון של אוצריא עצמה.',
@@ -39,7 +43,10 @@ class UpdateGuardBanner extends StatelessWidget {
     }
     return _tile(
       context,
-      color: Colors.red,
+      // אדום מכויל של הפלטה ולא `Colors.red` — האזהרה צריכה להיקרא,
+      // לא לצרוח מתוך מסך שכולו גוני אינדיגו.
+      color: AppColors.danger,
+      soft: AppColors.dangerSoft,
       icon: Icons.warning_amber_rounded,
       title: current.found
           ? 'הספרים שתמחק יחזרו — צריך לכבות משהו באוצריא'
@@ -51,26 +58,21 @@ class UpdateGuardBanner extends StatelessWidget {
   Widget _tile(
     BuildContext context, {
     required Color color,
+    required Color soft,
     required IconData icon,
     required String title,
     required String body,
   }) =>
-      Card(
-        color: color.withValues(alpha: 0.08),
+      TintedCard(
+        color: color,
+        soft: soft,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // תג אייקון צבעוני, כמו שאר סעיפי ההגדרות — לא רק אייקון בודד.
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: color),
-              ),
+              IconBadge(icon: icon, color: color),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
